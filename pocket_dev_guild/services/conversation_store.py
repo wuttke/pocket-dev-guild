@@ -1,4 +1,4 @@
-"""In-memory conversation store.
+"""Conversation store with pluggable storage backend.
 
 A `Conversation` groups successive jobs that share an agent-side session.
 Thread-unsafe on purpose, lives entirely on the asyncio event loop.
@@ -7,25 +7,39 @@ Thread-unsafe on purpose, lives entirely on the asyncio event loop.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from ..schemas import ConversationInfo
 from .notification_hub import NotificationHub
-
-
-@dataclass
-class _ConversationRecord:
-    info: ConversationInfo
-    # set while a turn (job + post-processing) is in flight, so the
-    # router can reject parallel turns with 409.
-    busy: bool = False
+from .storage_backend import InMemoryBackend, StorageBackend
 
 
 class ConversationStore:
-    def __init__(self, notifications: NotificationHub | None = None) -> None:
-        self._items: dict[str, _ConversationRecord] = {}
+    """Conversation store with pluggable backend."""
+
+    def __init__(
+        self,
+        backend: StorageBackend | None = None,
+        notifications: NotificationHub | None = None,
+    ) -> None:
+        self._backend = backend or InMemoryBackend()
         self._notifications = notifications or NotificationHub()
+        # In-memory busy state (not persisted)
+        self._busy: dict[str, bool] = {}
+
+    async def _ensure_indexes(self) -> None:
+        """Create backend indexes if supported (MongoDB only)."""
+        from .storage_backend import MongoBackend
+
+        if isinstance(self._backend, MongoBackend):
+            await self._backend.ensure_indexes(
+                "conversations",
+                [
+                    {"fields": "id", "unique": True},
+                    {"fields": "repo_id"},
+                    {"fields": "updated_at"},
+                ],
+            )
 
     def create(
         self,
@@ -48,23 +62,28 @@ class ConversationStore:
             updated_at=now,
             turns=[],
         )
-        self._items[conv_id] = _ConversationRecord(info=info)
+        # Store in backend (fire and forget for sync create)
+        import asyncio
+        asyncio.create_task(self._backend.insert("conversations", info.model_dump(mode="json")))
         return info
 
     async def get(self, conv_id: str) -> ConversationInfo | None:
-        record = self._items.get(conv_id)
-        return record.info if record else None
+        doc = await self._backend.get("conversations", conv_id)
+        if not doc:
+            return None
+        return ConversationInfo(**doc)
 
     async def list(self, repo_id: str | None = None) -> list[ConversationInfo]:
-        items = [r.info for r in self._items.values()]
-        if repo_id is not None:
-            items = [c for c in items if c.repo_id == repo_id]
-        items.sort(key=lambda c: c.updated_at, reverse=True)
-        return items
+        filter_dict = {"repo_id": repo_id} if repo_id is not None else None
+        docs = await self._backend.find(
+            "conversations",
+            filter=filter_dict,
+            sort=[("updated_at", -1)],
+        )
+        return [ConversationInfo(**doc) for doc in docs]
 
     def is_busy(self, conv_id: str) -> bool:
-        record = self._items.get(conv_id)
-        return bool(record and record.busy)
+        return self._busy.get(conv_id, False)
 
     def state(self, conv_id: str) -> tuple[ConversationInfo, bool] | None:
         """Snapshot info and busy flag atomically (single dict lookup)."""
@@ -84,19 +103,20 @@ class ConversationStore:
                 pass
 
     async def mark_busy(self, conv_id: str, busy: bool) -> None:
-        record = self._items.get(conv_id)
-        if record is None:
-            return
-        record.busy = busy
+        self._busy[conv_id] = busy
         await self._notifications.notify(f"conversation:{conv_id}")
 
     async def append_turn(self, conv_id: str, job_id: str) -> None:
-        record = self._items.get(conv_id)
-        if record is None:
+        # Get current turns
+        doc = await self._backend.get("conversations", conv_id)
+        if doc is None:
             return
-        turns = list(record.info.turns) + [job_id]
-        record.info = record.info.model_copy(
-            update={"turns": turns, "updated_at": datetime.now(timezone.utc)}
+
+        turns = doc.get("turns", []) + [job_id]
+        await self._backend.update(
+            "conversations",
+            conv_id,
+            {"turns": turns, "updated_at": datetime.now(timezone.utc)},
         )
         await self._notifications.notify(f"conversation:{conv_id}")
 
@@ -108,13 +128,11 @@ class ConversationStore:
         summary: str | None = None,
     ) -> None:
         """Update mutable fields. Only non-None values overwrite."""
-        record = self._items.get(conv_id)
-        if record is None:
-            return
         update: dict[str, object] = {"updated_at": datetime.now(timezone.utc)}
         if session_id is not None:
             update["session_id"] = session_id
         if summary is not None:
             update["summary"] = summary
-        record.info = record.info.model_copy(update=update)
+
+        await self._backend.update("conversations", conv_id, update)
         await self._notifications.notify(f"conversation:{conv_id}")

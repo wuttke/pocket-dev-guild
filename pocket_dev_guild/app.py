@@ -15,9 +15,9 @@ from .services.augment_runner import AugmentRunner, SubprocessAugmentRunner
 from .services.conversation_store import ConversationStore
 from .services.git_service import GitService
 from .services.job_store import JobStore
-from .services.mongo_conversation_store import MongoConversationStore
 from .services.mongo_job_store import MongoJobStore
 from .services.notification_hub import NotificationHub
+from .services.storage_backend import InMemoryBackend, MongoBackend
 
 
 def create_app(
@@ -34,40 +34,41 @@ def create_app(
     # Shared notification hub for real-time SSE updates
     notifications = NotificationHub()
 
-    # Initialize MongoDB stores if URL is configured
+    # Initialize storage backend and stores
     mongo_store = None
-    mongo_conversations = None
+    mongo_backend = None
 
-    if store is None and settings.mongodb_url:
+    if settings.mongodb_url:
         mongo_client = AsyncIOMotorClient(settings.mongodb_url)
         # Use database from URL, or default to "pocket_dev_guild"
         mongo_db = mongo_client.get_default_database() or mongo_client["pocket_dev_guild"]
+        mongo_backend = MongoBackend(mongo_db)
+
+    # Initialize job store (still has MongoDB-specific implementation)
+    if store is None and mongo_backend:
         mongo_store = MongoJobStore(mongo_db, notifications=notifications)
         store = mongo_store
     else:
         store = store or JobStore(notifications=notifications)
 
-    if conversations_store is None and settings.mongodb_url:
-        # Reuse the mongo client if we already have it
-        if mongo_store:
-            mongo_db = mongo_store._db
-        else:
-            mongo_client = AsyncIOMotorClient(settings.mongodb_url)
-            mongo_db = (
-                mongo_client.get_default_database() or mongo_client["pocket_dev_guild"]
-            )
-        mongo_conversations = MongoConversationStore(mongo_db, notifications=notifications)
-        conversations_store = mongo_conversations
-    else:
-        conversations_store = conversations_store or ConversationStore(notifications=notifications)
+    # Initialize conversation store with pluggable backend
+    if conversations_store is None:
+        backend = mongo_backend if mongo_backend else InMemoryBackend()
+        conversations_store = ConversationStore(
+            backend=backend, notifications=notifications
+        )
+
+    # Store mongo_backend reference for index creation
+    if mongo_backend:
+        mongo_conversations = conversations_store
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup: ensure MongoDB indexes
         if mongo_store:
             await mongo_store._ensure_indexes()
-        if mongo_conversations:
-            await mongo_conversations._ensure_indexes()
+        if mongo_backend:
+            await conversations_store._ensure_indexes()
         yield
         # Shutdown: nothing to clean up for now
 
