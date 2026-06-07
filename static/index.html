@@ -27,11 +27,8 @@
       <button id="reload">Worktrees neu laden</button>
     </div>
     <div>
-      <label>Neuer Worktree-Name
-        <input id="new-worktree" placeholder="feature/foo" />
-      </label>
-      <label>Base-Branch (optional)
-        <input id="base-branch" placeholder="main" />
+      <label>Neuer Branch
+        <input id="new-branch" placeholder="feature/foo" />
       </label>
       <button id="create-worktree">Worktree anlegen</button>
     </div>
@@ -74,16 +71,15 @@ async function loadWorktrees() {
 
 async function createWorktree() {
   const repoId = $("repo").value;
-  const name = $("new-worktree").value.trim();
-  const baseBranch = $("base-branch").value.trim() || null;
-  if (!name) return;
+  const branch = $("new-branch").value.trim();
+  if (!branch) return;
   const res = await fetch(`/repos/${repoId}/worktrees`, {
     method: "POST",
     headers: {"content-type": "application/json"},
-    body: JSON.stringify({name, base_branch: baseBranch}),
+    body: JSON.stringify({branch}),
   });
   if (!res.ok) { alert(await res.text()); return; }
-  $("new-worktree").value = "";
+  $("new-branch").value = "";
   await loadWorktrees();
 }
 
