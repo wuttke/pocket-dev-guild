@@ -1,37 +1,31 @@
-"""MongoDB-backed job store with asyncio.Condition push semantics.
+"""MongoDB-backed job store.
 
 Persists jobs and logs to MongoDB while maintaining the same interface as
-the in-memory JobStore. Uses asyncio.Condition for SSE push notifications.
+the in-memory JobStore.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..schemas import JobInfo, JobLog, JobStatus, LogLine
-
-
-@dataclass
-class _JobCondition:
-    """In-memory notification state for a job."""
-
-    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
+from .notification_hub import NotificationHub
 
 
 class MongoJobStore:
     """MongoDB job store. Thread-unsafe by design — runs on asyncio event loop."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(
+        self, db: AsyncIOMotorDatabase, notifications: NotificationHub | None = None
+    ) -> None:
         self._db = db
         self._jobs = db["jobs"]
         self._logs = db["job_logs"]
-        # In-memory condition variables for SSE push notifications
-        self._conditions: dict[str, _JobCondition] = {}
+        self._notifications = notifications or NotificationHub()
 
     async def _ensure_indexes(self) -> None:
         """Create MongoDB indexes for efficient queries."""
@@ -61,8 +55,6 @@ class MongoJobStore:
         )
         # Store in MongoDB (fire and forget for sync create)
         asyncio.create_task(self._jobs.insert_one(info.model_dump(mode="json")))
-        # Create condition for SSE
-        self._conditions[job_id] = _JobCondition()
         return info
 
     async def get(self, job_id: str) -> JobInfo | None:
@@ -95,12 +87,7 @@ class MongoJobStore:
         seq = await self._logs.count_documents({"job_id": job_id})
         doc = {"job_id": job_id, "seq": seq, **line.model_dump()}
         await self._logs.insert_one(doc)
-        
-        # Notify SSE subscribers
-        cond = self._conditions.get(job_id)
-        if cond:
-            async with cond.condition:
-                cond.condition.notify_all()
+        await self._notifications.notify(f"job:{job_id}")
 
     async def set_status(
         self, job_id: str, status: JobStatus, returncode: int | None = None
@@ -108,17 +95,12 @@ class MongoJobStore:
         update: dict[str, object] = {"status": status, "returncode": returncode}
         if status in ("finished", "failed"):
             update["finished_at"] = datetime.now(timezone.utc)
-        
+
         await self._jobs.update_one(
             {"id": job_id},
             {"$set": update}
         )
-        
-        # Notify SSE subscribers
-        cond = self._conditions.get(job_id)
-        if cond:
-            async with cond.condition:
-                cond.condition.notify_all()
+        await self._notifications.notify(f"job:{job_id}")
 
     async def set_session_meta(
         self,
@@ -135,25 +117,12 @@ class MongoJobStore:
             update["session_id"] = session_id
         if not update:
             return
-        
+
         await self._jobs.update_one(
             {"id": job_id},
             {"$set": update}
         )
-        
-        # Notify SSE subscribers
-        cond = self._conditions.get(job_id)
-        if cond:
-            async with cond.condition:
-                cond.condition.notify_all()
+        await self._notifications.notify(f"job:{job_id}")
 
     async def wait_for_update(self, job_id: str, timeout: float = 5.0) -> None:
-        cond = self._conditions.get(job_id)
-        if not cond:
-            # Job doesn't exist or condition not created yet
-            return
-        async with cond.condition:
-            try:
-                await asyncio.wait_for(cond.condition.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                pass
+        await self._notifications.wait(f"job:{job_id}", timeout=timeout)

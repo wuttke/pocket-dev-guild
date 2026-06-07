@@ -1,37 +1,32 @@
 """MongoDB-backed conversation store.
 
 Persists conversations to MongoDB while maintaining the same interface as
-the in-memory ConversationStore. Uses asyncio.Condition for notifications.
+the in-memory ConversationStore.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..schemas import ConversationInfo
-
-
-@dataclass
-class _ConversationCondition:
-    """In-memory notification state and busy flag for a conversation."""
-
-    busy: bool = False
-    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
+from .notification_hub import NotificationHub
 
 
 class MongoConversationStore:
     """MongoDB conversation store. Thread-unsafe by design."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(
+        self, db: AsyncIOMotorDatabase, notifications: NotificationHub | None = None
+    ) -> None:
         self._db = db
         self._conversations = db["conversations"]
-        # In-memory state for busy tracking and notifications
-        self._conditions: dict[str, _ConversationCondition] = {}
+        self._notifications = notifications or NotificationHub()
+        # In-memory busy state tracking (not persisted)
+        self._busy: dict[str, bool] = {}
 
     async def _ensure_indexes(self) -> None:
         """Create MongoDB indexes for efficient queries."""
@@ -62,17 +57,12 @@ class MongoConversationStore:
         )
         # Store in MongoDB (fire and forget for sync create)
         asyncio.create_task(self._conversations.insert_one(info.model_dump(mode="json")))
-        # Create condition for notifications
-        self._conditions[conv_id] = _ConversationCondition()
         return info
 
     async def get(self, conv_id: str) -> ConversationInfo | None:
         doc = await self._conversations.find_one({"id": conv_id}, {"_id": 0})
         if not doc:
             return None
-        # Ensure condition exists for this conversation
-        if conv_id not in self._conditions:
-            self._conditions[conv_id] = _ConversationCondition()
         return ConversationInfo(**doc)
 
     async def list(self, repo_id: str | None = None) -> list[ConversationInfo]:
@@ -81,43 +71,29 @@ class MongoConversationStore:
         return [ConversationInfo(**doc) for doc in docs]
 
     def is_busy(self, conv_id: str) -> bool:
-        cond = self._conditions.get(conv_id)
-        return bool(cond and cond.busy)
+        return self._busy.get(conv_id, False)
 
     async def mark_busy(self, conv_id: str, busy: bool) -> None:
-        cond = self._conditions.get(conv_id)
-        if cond is None:
-            # Create condition if it doesn't exist
-            self._conditions[conv_id] = _ConversationCondition(busy=busy)
-            cond = self._conditions[conv_id]
-        else:
-            cond.busy = busy
-        
-        async with cond.condition:
-            cond.condition.notify_all()
+        self._busy[conv_id] = busy
+        await self._notifications.notify(f"conversation:{conv_id}")
 
     async def append_turn(self, conv_id: str, job_id: str) -> None:
         # Get current conversation
         doc = await self._conversations.find_one({"id": conv_id})
         if doc is None:
             return
-        
+
         turns = doc.get("turns", []) + [job_id]
         update = {
             "turns": turns,
             "updated_at": datetime.now(timezone.utc),
         }
-        
+
         await self._conversations.update_one(
             {"id": conv_id},
             {"$set": update}
         )
-        
-        # Notify subscribers
-        cond = self._conditions.get(conv_id)
-        if cond:
-            async with cond.condition:
-                cond.condition.notify_all()
+        await self._notifications.notify(f"conversation:{conv_id}")
 
     async def patch(
         self,
@@ -132,14 +108,9 @@ class MongoConversationStore:
             update["session_id"] = session_id
         if summary is not None:
             update["summary"] = summary
-        
+
         await self._conversations.update_one(
             {"id": conv_id},
             {"$set": update}
         )
-        
-        # Notify subscribers
-        cond = self._conditions.get(conv_id)
-        if cond:
-            async with cond.condition:
-                cond.condition.notify_all()
+        await self._notifications.notify(f"conversation:{conv_id}")

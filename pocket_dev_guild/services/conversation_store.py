@@ -1,18 +1,17 @@
 """In-memory conversation store.
 
 A `Conversation` groups successive jobs that share an agent-side session.
-Mirrors the in-memory `JobStore`: thread-unsafe on purpose, lives entirely
-on the asyncio event loop.
+Thread-unsafe on purpose, lives entirely on the asyncio event loop.
 """
 
 from __future__ import annotations
 
-import asyncio
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from ..schemas import ConversationInfo
+from .notification_hub import NotificationHub
 
 
 @dataclass
@@ -21,12 +20,12 @@ class _ConversationRecord:
     # set while a turn (job + post-processing) is in flight, so the
     # router can reject parallel turns with 409.
     busy: bool = False
-    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
 
 
 class ConversationStore:
-    def __init__(self) -> None:
+    def __init__(self, notifications: NotificationHub | None = None) -> None:
         self._items: dict[str, _ConversationRecord] = {}
+        self._notifications = notifications or NotificationHub()
 
     def create(
         self,
@@ -89,8 +88,7 @@ class ConversationStore:
         if record is None:
             return
         record.busy = busy
-        async with record.condition:
-            record.condition.notify_all()
+        await self._notifications.notify(f"conversation:{conv_id}")
 
     async def append_turn(self, conv_id: str, job_id: str) -> None:
         record = self._items.get(conv_id)
@@ -100,8 +98,7 @@ class ConversationStore:
         record.info = record.info.model_copy(
             update={"turns": turns, "updated_at": datetime.now(timezone.utc)}
         )
-        async with record.condition:
-            record.condition.notify_all()
+        await self._notifications.notify(f"conversation:{conv_id}")
 
     async def patch(
         self,
@@ -120,5 +117,4 @@ class ConversationStore:
         if summary is not None:
             update["summary"] = summary
         record.info = record.info.model_copy(update=update)
-        async with record.condition:
-            record.condition.notify_all()
+        await self._notifications.notify(f"conversation:{conv_id}")

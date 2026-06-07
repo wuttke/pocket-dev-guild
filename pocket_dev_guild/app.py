@@ -17,6 +17,7 @@ from .services.git_service import GitService
 from .services.job_store import JobStore
 from .services.mongo_conversation_store import MongoConversationStore
 from .services.mongo_job_store import MongoJobStore
+from .services.notification_hub import NotificationHub
 
 
 def create_app(
@@ -30,6 +31,9 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings()
 
+    # Shared notification hub for real-time SSE updates
+    notifications = NotificationHub()
+
     # Initialize MongoDB stores if URL is configured
     mongo_store = None
     mongo_conversations = None
@@ -38,10 +42,10 @@ def create_app(
         mongo_client = AsyncIOMotorClient(settings.mongodb_url)
         # Use database from URL, or default to "pocket_dev_guild"
         mongo_db = mongo_client.get_default_database() or mongo_client["pocket_dev_guild"]
-        mongo_store = MongoJobStore(mongo_db)
+        mongo_store = MongoJobStore(mongo_db, notifications=notifications)
         store = mongo_store
     else:
-        store = store or JobStore()
+        store = store or JobStore(notifications=notifications)
 
     if conversations_store is None and settings.mongodb_url:
         # Reuse the mongo client if we already have it
@@ -52,10 +56,10 @@ def create_app(
             mongo_db = (
                 mongo_client.get_default_database() or mongo_client["pocket_dev_guild"]
             )
-        mongo_conversations = MongoConversationStore(mongo_db)
+        mongo_conversations = MongoConversationStore(mongo_db, notifications=notifications)
         conversations_store = mongo_conversations
     else:
-        conversations_store = conversations_store or ConversationStore()
+        conversations_store = conversations_store or ConversationStore(notifications=notifications)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
