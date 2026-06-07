@@ -99,23 +99,3 @@ class JobStore:
 
     async def wait_for_update(self, job_id: str, timeout: float = 5.0) -> None:
         await self._notifications.wait(f"job:{job_id}", timeout=timeout)
-
-    async def fail_orphans(self, *, reason: str = "server restart") -> int:
-        """Mark any queued/running job as failed.
-
-        Called at startup to clean up jobs whose subprocess died with the
-        previous server instance. In-memory state is wiped on restart, so
-        this is always a no-op for the in-memory store — kept for
-        protocol parity with MongoJobStore.
-        """
-        orphans = [
-            jid
-            for jid, rec in self._jobs.items()
-            if rec.info.status in ("queued", "running")
-        ]
-        for jid in orphans:
-            await self.append_log(
-                jid, LogLine(stream="stderr", line=f"-- {reason}, job orphaned --\n")
-            )
-            await self.set_status(jid, "failed", returncode=-2)
-        return len(orphans)

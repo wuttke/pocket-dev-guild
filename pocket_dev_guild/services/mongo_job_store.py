@@ -164,13 +164,14 @@ class MongoJobStore:
     async def fail_orphans(self, *, reason: str = "server restart") -> int:
         """Mark any queued/running job in Mongo as failed.
 
-        Called at startup to clean up jobs whose subprocess died with the
-        previous server instance. Appends a log line per orphaned job and
-        flips status to failed with returncode=-2.
+        Called from app lifespan startup to clean up jobs whose
+        subprocess died with the previous server instance. Appends a
+        log line per orphaned job and flips status to failed with
+        returncode=-2.
 
-        NOTE: assumes a single server instance. With multiple instances
-        behind a load balancer this would clobber jobs still running on
-        peers — see TODO in app.py lifespan.
+        Single-instance only. With multiple instances behind a load
+        balancer this would clobber jobs still running on peers — see
+        MULTIPLE_INSTANCES.md.
         """
         try:
             cursor = self._jobs.find(

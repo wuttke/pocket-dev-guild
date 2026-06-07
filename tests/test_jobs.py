@@ -1,10 +1,8 @@
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
 from pocket_dev_guild.schemas import LogLine
-from pocket_dev_guild.services.job_store import JobStore
 from tests.conftest import FakeRunner
 
 
@@ -94,28 +92,3 @@ def test_job_primary_repo(app_factory, tmp_config) -> None:
         job_id = create.json()["job_id"]
         info = client.get(f"/jobs/{job_id}").json()
         assert info["worktree"] is None
-
-
-@pytest.mark.asyncio
-async def test_fail_orphans_marks_inflight_jobs_failed() -> None:
-    store = JobStore()
-    queued = await store.create("demo", None, "p1")
-    running = await store.create("demo", None, "p2")
-    await store.set_status(running.id, "running")
-    done = await store.create("demo", None, "p3")
-    await store.set_status(done.id, "finished", returncode=0)
-
-    count = await store.fail_orphans()
-    assert count == 2
-
-    q = await store.get(queued.id)
-    r = await store.get(running.id)
-    d = await store.get(done.id)
-    assert q.status == "failed" and q.returncode == -2 and q.finished_at is not None
-    assert r.status == "failed" and r.returncode == -2 and r.finished_at is not None
-    # Already-terminal job is untouched.
-    assert d.status == "finished" and d.returncode == 0
-
-    # Orphan marker is in the log.
-    snap = await store.snapshot(running.id)
-    assert any("orphaned" in line.line for line in snap.log)

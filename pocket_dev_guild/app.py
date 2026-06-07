@@ -72,11 +72,13 @@ def create_app(
         # Mark jobs that were mid-flight when we died as failed. Their
         # subprocesses are gone with the previous process; without this,
         # they stay "running" forever and block their conversations.
+        # Only relevant for Mongo — the in-memory store is empty at
+        # startup, so there are no orphans to clean up.
         # TODO(multi-instance): this is unsafe behind a load balancer —
         # it would kill jobs owned by peer instances. Gate on an
         # instance_id or a heartbeat before scaling out.
-        if store is not None:
-            await store.fail_orphans()
+        if mongo_store is not None:
+            await mongo_store.fail_orphans()
         yield
         # Shutdown: nothing to clean up for now
 
