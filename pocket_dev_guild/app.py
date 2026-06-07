@@ -69,6 +69,14 @@ def create_app(
             await mongo_store._ensure_indexes()
         if mongo_backend:
             await conversations_store._ensure_indexes()
+        # Mark jobs that were mid-flight when we died as failed. Their
+        # subprocesses are gone with the previous process; without this,
+        # they stay "running" forever and block their conversations.
+        # TODO(multi-instance): this is unsafe behind a load balancer —
+        # it would kill jobs owned by peer instances. Gate on an
+        # instance_id or a heartbeat before scaling out.
+        if store is not None:
+            await store.fail_orphans()
         yield
         # Shutdown: nothing to clean up for now
 

@@ -160,3 +160,30 @@ class MongoJobStore:
 
     async def wait_for_update(self, job_id: str, timeout: float = 5.0) -> None:
         await self._notifications.wait(f"job:{job_id}", timeout=timeout)
+
+    async def fail_orphans(self, *, reason: str = "server restart") -> int:
+        """Mark any queued/running job in Mongo as failed.
+
+        Called at startup to clean up jobs whose subprocess died with the
+        previous server instance. Appends a log line per orphaned job and
+        flips status to failed with returncode=-2.
+
+        NOTE: assumes a single server instance. With multiple instances
+        behind a load balancer this would clobber jobs still running on
+        peers — see TODO in app.py lifespan.
+        """
+        try:
+            cursor = self._jobs.find(
+                {"status": {"$in": ["queued", "running"]}}, {"_id": 0, "id": 1}
+            )
+            ids = [doc["id"] for doc in await cursor.to_list(None)]
+        except Exception as e:
+            logger.error(f"Failed to scan for orphaned jobs: {e}")
+            return 0
+
+        for jid in ids:
+            await self.append_log(
+                jid, LogLine(stream="stderr", line=f"-- {reason}, job orphaned --\n")
+            )
+            await self.set_status(jid, "failed", returncode=-2)
+        return len(ids)

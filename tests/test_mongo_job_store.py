@@ -121,6 +121,32 @@ async def test_set_session_meta_only_overwrites_non_none(mongo_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_fail_orphans_marks_inflight_jobs_failed(mongo_db) -> None:
+    store = MongoJobStore(mongo_db)
+    queued = await store.create(repo_id="demo", worktree=None, prompt="p1")
+    running = await store.create(repo_id="demo", worktree=None, prompt="p2")
+    await store.set_status(running.id, "running")
+    done = await store.create(repo_id="demo", worktree=None, prompt="p3")
+    await store.set_status(done.id, "finished", returncode=0)
+
+    count = await store.fail_orphans()
+    assert count == 2
+
+    q = await store.get(queued.id)
+    r = await store.get(running.id)
+    d = await store.get(done.id)
+    assert q.status == "failed" and q.returncode == -2 and q.finished_at is not None
+    assert r.status == "failed" and r.returncode == -2 and r.finished_at is not None
+    assert d.status == "finished" and d.returncode == 0
+
+    # Second call must be a no-op.
+    assert await store.fail_orphans() == 0
+
+    snap = await store.snapshot(running.id)
+    assert any("orphaned" in line.line for line in snap.log)
+
+
+@pytest.mark.asyncio
 async def test_wait_for_update_unblocks_on_append_log(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
     info = await store.create(repo_id="demo", worktree="wt", prompt="p")
