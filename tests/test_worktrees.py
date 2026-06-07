@@ -164,3 +164,68 @@ def test_rejects_invalid_worktree_name_on_delete(client: TestClient) -> None:
     for name in ("with%20space", "a%2Eb%2Ec", "a%3Bb"):
         response = client.delete(f"/repos/demo/worktrees/{name}")
         assert response.status_code == 422, (name, response.text)
+
+
+def test_delete_blocked_by_unarchived_conversation(client: TestClient) -> None:
+    # Create a worktree, then a conversation bound to it: delete must 409.
+    client.post("/repos/demo/worktrees", json={"branch": "feature/blocker"})
+    conv = client.post(
+        "/conversations",
+        json={"repo_id": "demo", "worktree": "feature_blocker", "title": "x"},
+    )
+    assert conv.status_code == 200, conv.text
+    conv_id = conv.json()["id"]
+
+    resp = client.delete("/repos/demo/worktrees/feature_blocker")
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "worktree_has_active_resources"
+    assert detail["conversations"] == 1
+    assert detail["active_jobs"] == 0
+
+    # After archiving the conversation, deletion proceeds.
+    archived = client.delete(f"/conversations/{conv_id}")
+    assert archived.status_code == 204, archived.text
+
+    resp = client.delete("/repos/demo/worktrees/feature_blocker")
+    assert resp.status_code == 200, resp.text
+
+
+def test_delete_blocked_by_active_job(client: TestClient) -> None:
+    import asyncio
+
+    client.post("/repos/demo/worktrees", json={"branch": "feature/busy"})
+
+    # Seed a queued job directly via the store; no runner needed for
+    # the count-based guard.
+    store = client.app.state.store
+    asyncio.run(
+        store.create(
+            repo_id="demo", worktree="feature_busy", prompt="hi",
+        )
+    )
+
+    resp = client.delete("/repos/demo/worktrees/feature_busy")
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["active_jobs"] == 1
+    assert detail["conversations"] == 0
+
+
+def test_delete_allowed_when_only_finished_jobs_exist(client: TestClient) -> None:
+    import asyncio
+
+    client.post("/repos/demo/worktrees", json={"branch": "feature/done"})
+
+    store = client.app.state.store
+
+    async def _seed_finished() -> None:
+        info = await store.create(
+            repo_id="demo", worktree="feature_done", prompt="hi",
+        )
+        await store.set_status(info.id, "finished", returncode=0)
+
+    asyncio.run(_seed_finished())
+
+    resp = client.delete("/repos/demo/worktrees/feature_done")
+    assert resp.status_code == 200, resp.text

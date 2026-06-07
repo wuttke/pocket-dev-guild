@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Path as PathParam
 
 from ..config import RepoRegistry
-from ..deps import get_git, get_registry, get_repo
+from ..deps import get_conversations, get_git, get_registry, get_repo, get_store
 from ..schemas import (
     IDENT_PATTERN,
     Repo,
@@ -18,7 +18,9 @@ from ..schemas import (
     WorktreeInfo,
     WorktreeRemoved,
 )
+from ..services.conversation_store import ConversationStore
 from ..services.git_service import GitError, GitService
+from ..services.job_store import JobStore
 
 router = APIRouter(prefix="/repos/{repo_id}/worktrees", tags=["worktrees"])
 
@@ -77,7 +79,36 @@ async def delete_worktree(
     repo: Repo = Depends(get_repo),
     registry: RepoRegistry = Depends(get_registry),
     git: GitService = Depends(get_git),
+    conversations: ConversationStore = Depends(get_conversations),
+    jobs: JobStore = Depends(get_store),
 ) -> WorktreeRemoved:
+    # Guard against silently orphaning bound state. Unarchived
+    # conversations would survive as zombies (their session can't be
+    # resumed because the cwd is gone); active jobs would die mid-write
+    # to a directory we're about to delete.
+    active_conversations = await conversations.count(
+        repo_id=repo.id, worktree=name, include_archived=False
+    )
+    active_jobs = await jobs.count(
+        repo_id=repo.id, worktree=name, status="running"
+    ) + await jobs.count(
+        repo_id=repo.id, worktree=name, status="queued"
+    )
+    if active_conversations or active_jobs:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": "worktree_has_active_resources",
+                "worktree": name,
+                "conversations": active_conversations,
+                "active_jobs": active_jobs,
+                "hint": (
+                    "Archive the conversations and wait for/cancel "
+                    "active jobs before removing this worktree."
+                ),
+            },
+        )
+
     target = registry.worktree_path(repo, name)
     try:
         await git.remove_worktree(Path(repo.path), target)
