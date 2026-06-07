@@ -77,14 +77,30 @@ class ConversationStore:
             return None
         return ConversationInfo(**doc)
 
-    async def list(self, repo_id: str | None = None) -> list[ConversationInfo]:
-        filter_dict = {"repo_id": repo_id} if repo_id is not None else None
+    async def list(
+        self,
+        repo_id: str | None = None,
+        *,
+        include_archived: bool = False,
+    ) -> list[ConversationInfo]:
+        filter_dict: dict[str, object] = {}
+        if repo_id is not None:
+            filter_dict["repo_id"] = repo_id
+        if not include_archived:
+            # Older records (pre-archive) don't carry the field at all,
+            # so exclude only explicit True. Backends handle missing
+            # fields equally for {field: False} via exact match — to
+            # stay backend-agnostic, filter in Python after fetching.
+            pass
         docs = await self._backend.find(
             "conversations",
-            filter=filter_dict,
+            filter=filter_dict or None,
             sort=[("updated_at", -1)],
         )
-        return [ConversationInfo(**doc) for doc in docs]
+        infos = [ConversationInfo(**doc) for doc in docs]
+        if not include_archived:
+            infos = [c for c in infos if not c.archived]
+        return infos
 
     def is_busy(self, conv_id: str) -> bool:
         return self._busy.get(conv_id, False)
@@ -148,3 +164,21 @@ class ConversationStore:
         except Exception as e:
             logger.error(f"Failed to patch conversation {conv_id}: {e}")
             raise
+
+    async def archive(self, conv_id: str) -> bool:
+        """Mark a conversation as archived. Returns False if not found.
+
+        Soft delete: the record stays so historical jobs still resolve
+        their conversation_id. Archived conversations are hidden from
+        `list()` by default and reject new turns at the router level.
+        """
+        doc = await self._backend.get("conversations", conv_id)
+        if doc is None:
+            return False
+        await self._backend.update(
+            "conversations",
+            conv_id,
+            {"archived": True, "updated_at": datetime.now(timezone.utc)},
+        )
+        await self._notifications.notify(f"conversation:{conv_id}")
+        return True

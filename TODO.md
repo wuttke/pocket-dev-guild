@@ -50,8 +50,8 @@ and let the UI pick one per job.
 ✅ **Core endpoints implemented**.
 - [x] `POST /conversations`, `GET /conversations`, `GET /conversations/{id}`
 - [x] `POST /conversations/{id}/turns`, `GET /conversations/{id}/events`
-- [ ] `DELETE /conversations/{id}` — archive/delete conversation
-- [ ] `archived` field on `ConversationInfo`
+- [x] `DELETE /conversations/{id}` — soft archive; hides from list, blocks new turns
+- [x] `archived` field on `ConversationInfo`; opt-in via `?include_archived=true`
 - [ ] Pagination: `limit`, `offset`, `status`, `worktree`, `updated_since`, `sort`
 
 ## Frontend Rewrite

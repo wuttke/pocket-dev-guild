@@ -294,3 +294,41 @@ async def test_conversation_events_full_flow() -> None:
 def test_conversation_events_404_for_missing(client: TestClient) -> None:
     resp = client.get("/conversations/does-not-exist/events")
     assert resp.status_code == 404
+
+
+def test_archive_hides_conversation_and_blocks_turns(
+    client: TestClient, tmp_config
+) -> None:
+    _ensure_worktree(tmp_config)
+    a = client.post(
+        "/conversations",
+        json={"repo_id": "demo", "worktree": "feature-a", "title": "keep"},
+    ).json()
+    b = client.post(
+        "/conversations",
+        json={"repo_id": "demo", "worktree": "feature-a", "title": "gone"},
+    ).json()
+
+    # Archive `b`.
+    resp = client.delete(f"/conversations/{b['id']}")
+    assert resp.status_code == 204, resp.text
+
+    # Default list excludes archived; include_archived returns both.
+    visible = client.get("/conversations").json()
+    assert [c["id"] for c in visible] == [a["id"]]
+    all_ = client.get("/conversations?include_archived=true").json()
+    assert {c["id"] for c in all_} == {a["id"], b["id"]}
+    archived_doc = next(c for c in all_ if c["id"] == b["id"])
+    assert archived_doc["archived"] is True
+
+    # GET still works (job rows may still reference it).
+    assert client.get(f"/conversations/{b['id']}").status_code == 200
+
+    # New turns are rejected.
+    turn = client.post(
+        f"/conversations/{b['id']}/turns", json={"prompt": "p"}
+    )
+    assert turn.status_code == 409, turn.text
+
+    # Archiving a missing conversation is a 404.
+    assert client.delete("/conversations/does-not-exist").status_code == 404

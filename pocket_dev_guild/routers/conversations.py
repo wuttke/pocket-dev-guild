@@ -53,9 +53,12 @@ async def create_conversation(
 )
 async def list_conversations(
     repo_id: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
+    include_archived: bool = False,
     conversations: ConversationStore = Depends(get_conversations),
 ) -> list[ConversationInfo]:
-    return await conversations.list(repo_id=repo_id)
+    return await conversations.list(
+        repo_id=repo_id, include_archived=include_archived
+    )
 
 
 @router.get(
@@ -71,6 +74,19 @@ async def get_conversation(
     if conv is None:
         raise HTTPException(404, "Conversation not found")
     return conv
+
+
+@router.delete(
+    "/{conversation_id}",
+    status_code=204,
+    summary="Archive a conversation (soft delete)",
+)
+async def archive_conversation(
+    conversation_id: Annotated[str, Path(min_length=1)],
+    conversations: ConversationStore = Depends(get_conversations),
+) -> None:
+    if not await conversations.archive(conversation_id):
+        raise HTTPException(404, "Conversation not found")
 
 
 @router.post(
@@ -89,6 +105,8 @@ async def create_turn(
     conv = await conversations.get(conversation_id)
     if conv is None:
         raise HTTPException(404, "Conversation not found")
+    if conv.archived:
+        raise HTTPException(409, "Conversation is archived")
     return await start_job(
         repo_id=conv.repo_id,
         worktree=conv.worktree,

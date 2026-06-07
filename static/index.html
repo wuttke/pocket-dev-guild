@@ -43,6 +43,7 @@
         <select id="conversation"></select>
       </label>
       <button id="reload-conversations">neu laden</button>
+      <button id="archive-conversation">Archivieren</button>
     </div>
     <div>
       <label>Titel (für neue Conversation)
@@ -199,6 +200,15 @@ async function loadConversations(preferId) {
   openConversationStream($("conversation").value);
 }
 
+async function archiveConversation() {
+  const conversationId = $("conversation").value;
+  if (!conversationId) { alert("Keine Conversation gewählt."); return; }
+  if (!confirm("Conversation wirklich archivieren?")) return;
+  const res = await fetch(`/conversations/${conversationId}`, {method: "DELETE"});
+  if (!res.ok && res.status !== 204) { alert(await res.text()); return; }
+  await loadConversations();
+}
+
 async function newConversation() {
   const repoId = $("repo").value;
   const worktree = $("worktree").value || null;
@@ -254,6 +264,7 @@ $("create-worktree").addEventListener("click", createWorktree);
 $("delete-worktree").addEventListener("click", deleteWorktree);
 $("run").addEventListener("click", runAugment);
 $("reload-conversations").addEventListener("click", () => loadConversations());
+$("archive-conversation").addEventListener("click", archiveConversation);
 $("new-conversation").addEventListener("click", newConversation);
 $("conversation").addEventListener("change", () => openConversationStream($("conversation").value));
 $("send-turn").addEventListener("click", sendTurn);

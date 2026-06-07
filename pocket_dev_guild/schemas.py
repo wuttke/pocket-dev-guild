@@ -133,3 +133,7 @@ class ConversationInfo(BaseModel):
     updated_at: datetime
     # job ids in turn order; in-flight turn (if any) is the last entry.
     turns: list[str] = Field(default_factory=list)
+    # Archived conversations are hidden from the default list and reject
+    # new turns. The record is preserved (no physical delete) so existing
+    # job rows still resolve their conversation_id.
+    archived: bool = False

@@ -123,6 +123,34 @@ async def test_ensure_indexes_idempotent(mongo_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_archive_hides_from_list_and_keeps_get(mongo_db) -> None:
+    store = ConversationStore(backend=MongoBackend(mongo_db))
+    a = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="a"
+    )
+    b = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="b"
+    )
+
+    assert await store.archive(b.id) is True
+
+    visible = await store.list(repo_id="demo")
+    assert [c.id for c in visible] == [a.id]
+
+    all_ = await store.list(repo_id="demo", include_archived=True)
+    assert {c.id for c in all_} == {a.id, b.id}
+    archived = next(c for c in all_ if c.id == b.id)
+    assert archived.archived is True
+
+    # GET still resolves.
+    got = await store.get(b.id)
+    assert got is not None and got.archived is True
+
+    # Idempotent on missing.
+    assert await store.archive("nope") is False
+
+
+@pytest.mark.asyncio
 async def test_state_returns_info_and_busy_flag(mongo_db) -> None:
     store = ConversationStore(backend=MongoBackend(mongo_db))
     info = await store.create(
