@@ -46,11 +46,12 @@ class WorktreeInfo(BaseModel):
 
 
 # Branch names follow a `kind/slug[/slug...]` convention. The leading
-# segment is purely letters (e.g. `feature`, `bugfix`), subsequent
-# segments are kebab-case slugs. Worktree directory names are derived
-# from this by replacing `/` with `_`, which yields a string that
-# satisfies `IDENT_PATTERN` without further validation.
-BRANCH_PATTERN = r"^[a-z]+(/[a-z0-9-]+)+$"
+# segment is letters only (e.g. `feature`, `Hotfix`); slug segments
+# additionally allow digits, dashes and dots (e.g. `release/2.5.x`).
+# Worktree directory names are derived from this by lowercasing and
+# replacing `/` + `.` with `_`, which yields a string that satisfies
+# `IDENT_PATTERN` without further validation.
+BRANCH_PATTERN = r"^[A-Za-z]+(/[A-Za-z0-9.-]+)+$"
 
 
 class WorktreeCreate(BaseModel):

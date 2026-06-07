@@ -39,20 +39,33 @@ async def list_worktrees(
 @router.post("", response_model=WorktreeCreated, summary="Create a worktree")
 async def create_worktree(
     body: WorktreeCreate,
+    existing: bool = False,
     repo: Repo = Depends(get_repo),
     registry: RepoRegistry = Depends(get_registry),
     git: GitService = Depends(get_git),
 ) -> WorktreeCreated:
-    # Always create a fresh branch off `origin`'s default tip; the
-    # worktree directory mirrors the branch with `/` -> `_` so it
-    # satisfies `IDENT_PATTERN` for use in URL segments.
-    name = body.branch.replace("/", "_")
+    # Worktree directory mirrors the branch, lower-cased with `/` and
+    # `.` replaced by `_`. This both satisfies `IDENT_PATTERN` for use
+    # in URL segments and makes `Feature/Foo` collide with `feature/foo`
+    # on the filesystem, so we never end up with two case-only-distinct
+    # worktrees.
+    name = body.branch.lower().replace("/", "_").replace(".", "_")
     target = registry.worktree_path(repo, name)
     try:
-        start_point = await git.default_remote_branch(Path(repo.path))
-        await git.add_worktree(
-            Path(repo.path), target, branch=body.branch, start_point=start_point
-        )
+        if existing:
+            # Check out an existing branch (local or remote tracking).
+            await git.add_worktree(
+                Path(repo.path), target, branch=body.branch
+            )
+        else:
+            # Create a fresh branch off the remote default tip.
+            start_point = await git.default_remote_branch(Path(repo.path))
+            await git.add_worktree(
+                Path(repo.path),
+                target,
+                branch=body.branch,
+                start_point=start_point,
+            )
     except GitError as exc:
         raise HTTPException(400, str(exc))
     return WorktreeCreated(name=name, path=str(target))

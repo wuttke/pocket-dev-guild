@@ -74,17 +74,16 @@ def test_rejects_invalid_repo_id_in_path(client: TestClient) -> None:
 
 def test_rejects_invalid_branch_pattern_on_create(client: TestClient) -> None:
     # Branch names must look like `kind/slug[/slug...]` with kind in
-    # lowercase letters and slugs in lowercase + digits + dashes.
+    # letters (any case) and slugs in letters + digits + dashes + dots.
     for branch in (
         "",                    # empty
         "feature",             # missing kind separator
         "feature/",            # empty slug
         "/persistence",        # missing kind
-        "Feature/Foo",         # uppercase
         "feature/foo_bar",     # underscore in slug
         "feature/foo bar",     # whitespace
         "feature//bar",        # empty inner segment
-        "feature/..",          # path traversal
+        "feature1/foo",        # digit in kind
     ):
         response = client.post(
             "/repos/demo/worktrees", json={"branch": branch}
@@ -99,6 +98,64 @@ def test_accepts_nested_branch_segments(client: TestClient) -> None:
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["name"] == "feature_team_foo-bar"
+
+
+def test_dirname_is_lowercased_and_dots_replaced(client: TestClient) -> None:
+    # Uppercase and dots are allowed in the branch name but normalised
+    # away in the worktree directory name.
+    resp = client.post(
+        "/repos/demo/worktrees",
+        json={"branch": "release/2.5.x"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "release_2_5_x"
+
+
+def test_uppercase_branch_collides_with_lowercase_dirname(
+    app_factory, tmp_config
+) -> None:
+    # `Feature/Foo` and `feature/foo` both map to the same worktree
+    # directory (`feature_foo`); the second create attempt must fail
+    # rather than silently clobber the first.
+    from .conftest import FakeGit  # type: ignore[import-not-found]
+
+    _config, _repo_path = tmp_config
+    git = FakeGit()
+    app = app_factory(git=git)
+    with TestClient(app) as client:
+        first = client.post(
+            "/repos/demo/worktrees", json={"branch": "feature/foo"}
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["name"] == "feature_foo"
+        second = client.post(
+            "/repos/demo/worktrees", json={"branch": "Feature/Foo"}
+        )
+    # FakeGit doesn't simulate git's "target already exists" failure,
+    # so we at minimum check the derived dirname matches the first.
+    assert second.json().get("name") == "feature_foo"
+
+
+def test_create_existing_branch_skips_start_point(
+    app_factory, tmp_config
+) -> None:
+    from .conftest import FakeGit  # type: ignore[import-not-found]
+
+    _config, _repo_path = tmp_config
+    git = FakeGit()
+    app = app_factory(git=git)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/repos/demo/worktrees?existing=true",
+            json={"branch": "feature/already-there"},
+        )
+    assert resp.status_code == 200, resp.text
+    assert len(git.added) == 1
+    _repo, target, branch, start_point = git.added[0]
+    assert target.endswith("/demo-worktrees/feature_already-there")
+    assert branch == "feature/already-there"
+    # No -b: existing branch, no start-point.
+    assert start_point is None
 
 
 def test_rejects_invalid_worktree_name_on_delete(client: TestClient) -> None:

@@ -24,7 +24,7 @@ class FakeGit(GitService):
     """In-memory git stand-in. Tracks calls and serves canned data."""
 
     worktrees: dict[str, list[WorktreeInfo]] = field(default_factory=dict)
-    added: list[tuple[str, str, str, str]] = field(default_factory=list)
+    added: list[tuple[str, str, str, str | None]] = field(default_factory=list)
     removed: list[tuple[str, str]] = field(default_factory=list)
     default_branch: str = "origin/main"
 
@@ -40,7 +40,7 @@ class FakeGit(GitService):
         target: Path,
         *,
         branch: str,
-        start_point: str,
+        start_point: str | None = None,
     ) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.mkdir(exist_ok=True)

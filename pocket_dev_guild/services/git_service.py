@@ -89,19 +89,22 @@ class GitService:
         target: Path,
         *,
         branch: str,
-        start_point: str,
+        start_point: str | None = None,
     ) -> None:
-        """Create `target` as a worktree with a fresh `branch` off `start_point`.
+        """Create `target` as a worktree for `branch`.
 
-        Always uses `-b`, so callers must hand in a branch name that
-        does not yet exist; otherwise git fails and we surface that as
-        a `GitError`.
+        With `start_point` set, runs `git worktree add -b <branch>
+        <target> <start_point>` and so requires `branch` to be new.
+        With `start_point=None`, runs `git worktree add <target>
+        <branch>` to check out an existing branch (local or remote
+        tracking); git fails if no such branch exists.
         """
         target.parent.mkdir(parents=True, exist_ok=True)
-        code, _, err = await self._run(
-            ["worktree", "add", "-b", branch, str(target), start_point],
-            repo_path,
-        )
+        if start_point is not None:
+            args = ["worktree", "add", "-b", branch, str(target), start_point]
+        else:
+            args = ["worktree", "add", str(target), branch]
+        code, _, err = await self._run(args, repo_path)
         if code != 0:
             raise GitError(err.strip() or "git worktree add failed", code)
 
