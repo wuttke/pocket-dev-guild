@@ -52,11 +52,11 @@ class ConversationStore:
         self._items[conv_id] = _ConversationRecord(info=info)
         return info
 
-    def get(self, conv_id: str) -> ConversationInfo | None:
+    async def get(self, conv_id: str) -> ConversationInfo | None:
         record = self._items.get(conv_id)
         return record.info if record else None
 
-    def list(self, repo_id: str | None = None) -> list[ConversationInfo]:
+    async def list(self, repo_id: str | None = None) -> list[ConversationInfo]:
         items = [r.info for r in self._items.values()]
         if repo_id is not None:
             items = [c for c in items if c.repo_id == repo_id]

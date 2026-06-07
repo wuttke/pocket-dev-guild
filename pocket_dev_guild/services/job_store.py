@@ -45,17 +45,17 @@ class JobStore:
         self._jobs[job_id] = _JobRecord(info=info)
         return info
 
-    def get(self, job_id: str) -> JobInfo | None:
+    async def get(self, job_id: str) -> JobInfo | None:
         record = self._jobs.get(job_id)
         return record.info if record else None
 
-    def snapshot(self, job_id: str) -> JobLog | None:
+    async def snapshot(self, job_id: str) -> JobLog | None:
         record = self._jobs.get(job_id)
         if not record:
             return None
         return JobLog(**record.info.model_dump(), log=list(record.log))
 
-    def log_slice(self, job_id: str, start: int) -> list[LogLine]:
+    async def log_slice(self, job_id: str, start: int) -> list[LogLine]:
         record = self._jobs.get(job_id)
         if not record:
             return []

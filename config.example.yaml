@@ -3,6 +3,11 @@
 # agent_binary: auggie
 # agent_prompt_param: --print
 
+# Optional: MongoDB connection URL for job and conversation persistence.
+# If not specified, uses in-memory stores (data lost on restart).
+# Default: mongodb://localhost:27017
+# mongodb_url: mongodb://localhost:27017
+
 repos:
   - id: example
     name: example
