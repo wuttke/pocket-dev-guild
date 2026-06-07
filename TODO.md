@@ -64,3 +64,31 @@ backend works, not good enough to live with.
 - [ ] Agent picker once `GET /agents` lands.
 - [ ] Generate a typed client from `/openapi.json` (e.g. `openapi-ts`)
       so the frontend doesn't hand-roll request shapes.
+
+### Pretty log rendering (ANSI handling)
+
+Agent CLIs like `auggie` emit ANSI escape sequences (e.g. `ESC[90m` for
+gray, `ESC[0m` reset, `ESC[2K` clear line, `ESC[?25l/h` cursor on/off)
+even when stdout is a pipe. The browser shows the raw `␛[…m` bytes in
+the `<pre>` log instead of formatting.
+
+Three options, in order of effort:
+
+- [ ] **Disable colors at the source** (simplest, no UI work): pass
+      `NO_COLOR=1` and `TERM=dumb` in the subprocess env from
+      `SubprocessAugmentRunner`. De-facto standard, respected by most
+      modern CLIs. Trade-off: no color information at all.
+- [ ] **Strip on the server**: drop ANSI sequences in
+      `SubprocessAugmentRunner._pump` with a regex like
+      `re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", line)` before storing the
+      `LogLine`. Same visual result as option 1, but keeps colored
+      output available for terminal users running the CLI directly.
+- [ ] **Render in the browser**: convert ANSI to `<span style="…">`
+      client-side (e.g. [`ansi_up`](https://github.com/drudru/ansi_up),
+      ~3 kB). Output matches what the user sees in their terminal —
+      colors, bold, dimmed text. Needs a small DOM change in
+      `static/index.html` (insert HTML instead of appending text) and
+      careful escaping of the non-ANSI parts.
+
+Recommendation when the frontend gets rewritten: option 3 alongside the
+agent picker, so log readability scales with the multi-agent story.
