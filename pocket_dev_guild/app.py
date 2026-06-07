@@ -35,7 +35,11 @@ def create_app(
     app.state.registry = RepoRegistry(settings.config_path)
     app.state.git = git or GitService()
     app.state.store = store
-    app.state.runner = runner or SubprocessAugmentRunner(store=store)
+    app.state.runner = runner or SubprocessAugmentRunner(
+        store=store,
+        binary=settings.agent_binary,
+        prompt_param=settings.agent_prompt_param,
+    )
 
     app.include_router(repos.router)
     app.include_router(worktrees.router)

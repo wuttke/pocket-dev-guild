@@ -20,16 +20,17 @@ class AugmentRunner(Protocol):
 
 @dataclass
 class SubprocessAugmentRunner:
-    """Default runner – spawns the real `augment` binary."""
+    """Default runner – spawns the configured agent binary."""
 
     store: JobStore
-    binary: str = "augment"
+    binary: str = "auggie"
+    prompt_param: str = "--print"
 
     async def run(self, job_id: str, cwd: Path, prompt: str) -> None:
         await self.store.set_status(job_id, "running")
         try:
             process = await asyncio.create_subprocess_exec(
-                self.binary, "--prompt", prompt,
+                self.binary, self.prompt_param, prompt,
                 cwd=str(cwd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

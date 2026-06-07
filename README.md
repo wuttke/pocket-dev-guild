@@ -1,9 +1,16 @@
 # Pocket Dev Guild
 
 A small FastAPI web app that lists git repositories from a config file,
-manages their worktrees, and runs the `augment` CLI inside a chosen
-worktree — streaming its output live to the browser via Server-Sent
-Events.
+manages their worktrees, and runs a coding-agent CLI (`auggie` by
+default) inside a chosen worktree — streaming its output live to the
+browser via Server-Sent Events.
+
+The binary and the prompt flag are configurable in `config.yaml`:
+
+```yaml
+agent_binary: auggie         # default
+agent_prompt_param: --print  # default
+```
 
 ## Quickstart
 

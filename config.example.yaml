@@ -1,3 +1,8 @@
+# Optional: which agent binary to invoke and how to pass the prompt.
+# Defaults shown below.
+# agent_binary: auggie
+# agent_prompt_param: --print
+
 repos:
   - id: example
     name: example
