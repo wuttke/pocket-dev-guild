@@ -29,16 +29,14 @@ and let the UI pick one per job.
       agent by id and renders the prompt into the args template.
 - [ ] Tests: fake agents covering happy path + unknown-agent-id 404.
 
-## Job & Conversation Persistence (MongoDB)
+## Persistence
 
-✅ **Status**: MongoDB backend implemented for both jobs and conversations.
+✅ **MongoDB backend implemented** for jobs and conversations.
 - [x] MongoDB integration with `motor` (async driver)
-- [x] Conversation persistence with MongoDB backend
-- [x] `created_at` / `finished_at` timestamps on `JobInfo`
+- [x] Job and conversation persistence
 - [x] Configurable via `mongodb_url` in `config.yaml`
-- [ ] Migration to MongoDB-only (remove in-memory fallback)
-- [ ] Schema indexes for performance
-- [ ] Retention / pruning (cap log lines per job, delete old jobs)
+- [x] Timestamps (`created_at`, `finished_at`, `updated_at`)
+- [ ] Retention / pruning (cap log lines per job, delete old jobs/conversations)
 
 ## Jobs API
 
@@ -46,21 +44,15 @@ and let the UI pick one per job.
   - Query params: `limit`, `offset`, `repo_id`, `status`, `conversation_id`, `sort`
   - Response: `{jobs: [...], total, limit, offset}`
 - [ ] `DELETE /jobs/{job_id}` to cancel/kill running jobs
-- [ ] Job log truncation (cap at N lines, stream remaining)
 
 ## Conversations API
 
-✅ **Status**: Core conversation endpoints implemented.
-- [x] `POST /conversations` — create conversation
-- [x] `GET /conversations` — list conversations (with `repo_id` filter)
-- [x] `GET /conversations/{id}` — get conversation details
-- [x] `POST /conversations/{id}/turns` — add turn to conversation
-- [x] `GET /conversations/{id}/events` — SSE stream of conversation state
+✅ **Core endpoints implemented**.
+- [x] `POST /conversations`, `GET /conversations`, `GET /conversations/{id}`
+- [x] `POST /conversations/{id}/turns`, `GET /conversations/{id}/events`
 - [ ] `DELETE /conversations/{id}` — archive/delete conversation
-- [ ] Add `archived` field to `ConversationInfo`
-- [ ] Pagination support for `GET /conversations`
-  - Query params: `limit`, `offset`, `status`, `worktree`, `updated_since`, `sort`
-- [ ] More filters: `status`, `worktree`, `updated_since`
+- [ ] `archived` field on `ConversationInfo`
+- [ ] Pagination: `limit`, `offset`, `status`, `worktree`, `updated_since`, `sort`
 
 ## Frontend Rewrite
 
@@ -71,12 +63,12 @@ See **FRONTEND.md** for complete frontend developer guide.
 ✅ **Current vanilla HTML (`static/index.html`)**:
 - [x] Repo / worktree browser with create + **delete**
 - [x] Conversation support (create, list, send turns, SSE updates)
-- [x] One-shot job mode
 - [x] Real-time log streaming via SSE
 - [x] Support for creating new or checking out existing branches
 
 **Needed for production**:
 - [ ] Mobile-first responsive UI (bottom nav on mobile, sidebar on desktop)
+- [ ] **Worktree delete UI** (swipe-to-delete on mobile, delete button on desktop)
 - [ ] Job list view (requires `GET /jobs`)
 - [ ] Paginated conversation list
 - [ ] Virtual scrolling for long logs
@@ -84,40 +76,3 @@ See **FRONTEND.md** for complete frontend developer guide.
 - [ ] Keyboard shortcuts
 - [ ] Dark mode
 - [ ] PWA features (manifest, service worker, offline support)
-
-
-## Additional Backend TODOs
-
-### Performance & Monitoring
-- [ ] Add request logging middleware
-- [ ] Implement health check endpoint (`GET /health`)
-- [ ] Add metrics collection (Prometheus, StatsD)
-- [ ] Log rotation for job logs
-- [ ] Connection pooling for MongoDB
-
-### Error Handling
-- [ ] Custom exception handlers for common errors
-- [ ] Structured error responses with error codes
-- [ ] Better validation error messages
-
-### Configuration
-- [ ] Environment variable support for all config options
-- [ ] Config hot-reload without restart
-- [ ] Validate config schema on startup
-
-### Git Operations
-- [ ] Add `git fetch` before creating worktrees
-- [ ] Support for remote branches (not just `origin`)
-- [ ] Worktree prune on startup (remove stale entries)
-- [ ] Better error messages for git failures
-
-### Job Cancellation
-- [ ] `DELETE /jobs/{job_id}` to kill running jobs
-- [ ] Send SIGTERM to subprocess, SIGKILL after timeout
-- [ ] Update job status to `cancelled`
-- [ ] SSE event for cancellation
-
-### Rate Limiting
-- [ ] Per-IP rate limiting for job creation
-- [ ] Per-repo rate limiting
-- [ ] Configurable limits in `config.yaml`

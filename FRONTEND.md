@@ -34,11 +34,9 @@ The application is designed to be accessed primarily via mobile devices, with re
 - **Size**: ~260 lines of vanilla JavaScript
 - **Features**:
   - Repository selection dropdown
-  - Worktree management (list, create, **delete**)
-  - **Conversation support** (create, list, send turns, real-time updates via SSE)
-  - Single job submission (one-shot mode)
+  - **Worktree management**: list, create (new or existing branch), **delete**
+  - **Conversation support**: create, list, send turns, real-time updates via SSE
   - Real-time log streaming via SSE
-  - Support for creating new branches or checking out existing branches
 - **Limitations**:
   - No job history/list view
   - No pagination for conversations or jobs
@@ -161,25 +159,7 @@ Remove a worktree.
 
 #### Jobs
 
-##### `POST /jobs`
-Start a new job (agent run).
-
-**Request Body**:
-```json
-{
-  "repo_id": "my-project",
-  "worktree": "feature_new-feature",
-  "prompt": "Add unit tests for the authentication module",
-  "conversation_id": null
-}
-```
-
-**Response**: `200 OK`
-```json
-{
-  "job_id": "a1b2c3d4e5f6..."
-}
-```
+**Note**: Jobs are only created through conversations. There is no standalone job creation endpoint. Use `POST /conversations/{id}/turns` to create jobs within a conversation context.
 
 ##### `GET /jobs/{job_id}`
 Get job metadata.
@@ -463,12 +443,8 @@ interface WorktreeCreated {
 type JobStatus = 'queued' | 'running' | 'finished' | 'failed';
 type LogStream = 'stdout' | 'stderr';
 
-interface JobCreate {
-  repo_id: string;
-  worktree: string | null;    // null = use primary checkout
-  prompt: string;
-  conversation_id: string | null;
-}
+// Note: Jobs are only created through conversation turns
+// No standalone JobCreate - use ConversationTurnCreate instead
 
 interface JobInfo {
   id: string;
@@ -641,6 +617,7 @@ eventSource.addEventListener('error', () => {
 - Expandable card per repository
 - Tap to expand → show worktrees list
 - Floating Action Button (FAB) to create worktree
+- **Swipe-to-delete** on worktree items (except primary)
 - Pull-to-refresh
 
 **Features**:
@@ -653,8 +630,8 @@ eventSource.addEventListener('error', () => {
 │ │ /home/user/repos/... │ │
 │ │ ▼ Worktrees (3)      │ │
 │ │   ├─ main (primary)  │ │
-│ │   ├─ feature_auth    │ │
-│ │   └─ fix_bug-123     │ │
+│ │   ├─ feature_auth  🗑 │ │  ← swipe left to delete
+│ │   └─ fix_bug-123   🗑 │ │
 │ └──────────────────────┘ │
 │                          │
 │ ┌──────────────────────┐ │
@@ -665,6 +642,10 @@ eventSource.addEventListener('error', () => {
 │               [+ FAB]    │
 └──────────────────────────┘
 ```
+
+**Desktop View**:
+- Delete button appears on hover
+- Confirmation dialog before deletion
 
 #### Screen 2: Conversations
 **Mobile View**:
@@ -730,41 +711,45 @@ Legend:
 └──────────────────────────┘
 ```
 
-#### Screen 3: Jobs (Standalone)
+#### Screen 3: Jobs History
 **Mobile View**:
-- Quick job creation without conversation
-- Job history with filters (status, repo, date)
+- Job history with filters (status, repo, date, conversation)
 - Live status indicators
 - Tap to view logs
+- Jobs are always part of a conversation
 
 **Features**:
 ```
 ┌──────────────────────────┐
-│ 📝 Jobs                  │
+│ 📝 Jobs History          │
 │ ──────────────────────── │
 │ 🔍 [Filters: All ▼]      │
 │ ──────────────────────── │
 │ ┌──────────────────────┐ │
 │ │ 🔄 Add unit tests    │ │
+│ │ Conv: Auth Impl      │ │
 │ │ my-project/feature   │ │
 │ │ Running · 2m 15s     │ │
 │ │ [View Logs]          │ │
 │ └──────────────────────┘ │
 │ ┌──────────────────────┐ │
 │ │ ✅ Fix bug #123      │ │
+│ │ Conv: Bug Fixes      │ │
 │ │ my-project/main      │ │
 │ │ Finished · 5m ago    │ │
 │ │ Exit: 0              │ │
 │ └──────────────────────┘ │
 │ ┌──────────────────────┐ │
 │ │ ❌ Refactor auth     │ │
+│ │ Conv: Refactoring    │ │
 │ │ another-project      │ │
 │ │ Failed · 1h ago      │ │
 │ │ Exit: 1              │ │
 │ └──────────────────────┘ │
-│                          │
-│     [Start Quick Job]    │
 └──────────────────────────┘
+
+Note: All jobs belong to a conversation.
+Create jobs via conversation turns.
 ```
 
 #### Screen 4: Job Log Viewer
@@ -1395,12 +1380,12 @@ async function createJob(data) {
 - [ ] Implement API client with generated types
 - [ ] Set up TanStack Query and React Router
 - [ ] Create Zustand store for client state
-- [ ] Implement repository and worktree management
+- [ ] Implement repository and worktree management with **delete UI**
 - [ ] Build conversation list and detail views
-- [ ] Implement job creation with both one-shot and conversation modes
+- [ ] Implement job creation through conversation turns
 - [ ] Add SSE log streaming with ansi-to-react
 - [ ] Implement real-time conversation updates via SSE
-- [ ] Add worktree deletion functionality
+- [ ] Add worktree deletion UI (swipe-to-delete on mobile, button on desktop)
 
 ### UI/UX
 - [ ] Build mobile-first responsive layout (bottom nav on mobile, sidebar on desktop)
