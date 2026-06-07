@@ -6,7 +6,10 @@ for in-memory and MongoDB storage.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class StorageBackend(Protocol):
@@ -126,13 +129,21 @@ class MongoBackend:
         """
         coll = self._db[collection]
         for idx in indexes:
-            fields = idx["fields"]
-            unique = idx.get("unique", False)
-            await coll.create_index(fields, unique=unique)
+            try:
+                fields = idx["fields"]
+                unique = idx.get("unique", False)
+                # create_index is idempotent - if index exists, it's a no-op
+                await coll.create_index(fields, unique=unique)
+            except Exception as e:
+                logger.error(f"Failed to create index on {collection}.{idx['fields']}: {e}")
 
     async def get(self, collection: str, id: str) -> dict[str, Any] | None:
-        doc = await self._db[collection].find_one({"id": id}, {"_id": 0})
-        return doc
+        try:
+            doc = await self._db[collection].find_one({"id": id}, {"_id": 0})
+            return doc
+        except Exception as e:
+            logger.error(f"Failed to get document {id} from {collection}: {e}")
+            return None
 
     async def find(
         self,
@@ -141,28 +152,44 @@ class MongoBackend:
         sort: list[tuple[str, int]] | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        query = filter or {}
-        cursor = self._db[collection].find(query, {"_id": 0})
+        try:
+            query = filter or {}
+            cursor = self._db[collection].find(query, {"_id": 0})
 
-        if sort:
-            cursor = cursor.sort(sort)
+            if sort:
+                cursor = cursor.sort(sort)
 
-        if limit is not None:
-            cursor = cursor.limit(limit)
+            if limit is not None:
+                cursor = cursor.limit(limit)
 
-        return await cursor.to_list(None)
+            return await cursor.to_list(None)
+        except Exception as e:
+            logger.error(f"Failed to find documents in {collection}: {e}")
+            return []
 
     async def insert(self, collection: str, document: dict[str, Any]) -> None:
-        await self._db[collection].insert_one(document)
+        try:
+            await self._db[collection].insert_one(document)
+        except Exception as e:
+            logger.error(f"Failed to insert document into {collection}: {e}")
+            raise
 
     async def update(
         self, collection: str, id: str, updates: dict[str, Any]
     ) -> None:
-        await self._db[collection].update_one({"id": id}, {"$set": updates})
+        try:
+            await self._db[collection].update_one({"id": id}, {"$set": updates})
+        except Exception as e:
+            logger.error(f"Failed to update document {id} in {collection}: {e}")
+            raise
 
     async def append_to_list(
         self, collection: str, id: str, field: str, item: dict[str, Any]
     ) -> None:
-        await self._db[collection].update_one(
-            {"id": id}, {"$push": {field: item}}
-        )
+        try:
+            await self._db[collection].update_one(
+                {"id": id}, {"$push": {field: item}}
+            )
+        except Exception as e:
+            logger.error(f"Failed to append to list {field} in {collection}.{id}: {e}")
+            raise

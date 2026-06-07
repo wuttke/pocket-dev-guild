@@ -6,12 +6,16 @@ Thread-unsafe on purpose, lives entirely on the asyncio event loop.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from ..schemas import ConversationInfo
 from .notification_hub import NotificationHub
 from .storage_backend import InMemoryBackend, StorageBackend
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationStore:
@@ -62,9 +66,14 @@ class ConversationStore:
             updated_at=now,
             turns=[],
         )
-        # Store in backend (fire and forget for sync create)
-        import asyncio
-        asyncio.create_task(self._backend.insert("conversations", info.model_dump(mode="json")))
+        # Store in backend with error handling
+        async def _insert_with_logging():
+            try:
+                await self._backend.insert("conversations", info.model_dump(mode="json"))
+            except Exception as e:
+                logger.error(f"Failed to persist conversation {conv_id}: {e}")
+
+        asyncio.create_task(_insert_with_logging())
         return info
 
     async def get(self, conv_id: str) -> ConversationInfo | None:
@@ -85,40 +94,44 @@ class ConversationStore:
     def is_busy(self, conv_id: str) -> bool:
         return self._busy.get(conv_id, False)
 
-    def state(self, conv_id: str) -> tuple[ConversationInfo, bool] | None:
-        """Snapshot info and busy flag atomically (single dict lookup)."""
-        record = self._items.get(conv_id)
-        if record is None:
+    async def state(self, conv_id: str) -> tuple[ConversationInfo, bool] | None:
+        """Snapshot info and busy flag atomically."""
+        info = await self.get(conv_id)
+        if info is None:
             return None
-        return record.info, record.busy
+        busy = self.is_busy(conv_id)
+        return info, busy
 
     async def wait_for_update(self, conv_id: str, timeout: float = 5.0) -> None:
-        record = self._items.get(conv_id)
-        if record is None:
-            return
-        async with record.condition:
-            try:
-                await asyncio.wait_for(record.condition.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                pass
+        """Wait for an update notification on this conversation."""
+        await self._notifications.wait(f"conversation:{conv_id}", timeout=timeout)
 
     async def mark_busy(self, conv_id: str, busy: bool) -> None:
         self._busy[conv_id] = busy
         await self._notifications.notify(f"conversation:{conv_id}")
 
     async def append_turn(self, conv_id: str, job_id: str) -> None:
-        # Get current turns
-        doc = await self._backend.get("conversations", conv_id)
-        if doc is None:
-            return
+        """Append a job_id to the conversation's turn list.
 
-        turns = doc.get("turns", []) + [job_id]
-        await self._backend.update(
-            "conversations",
-            conv_id,
-            {"turns": turns, "updated_at": datetime.now(timezone.utc)},
-        )
-        await self._notifications.notify(f"conversation:{conv_id}")
+        Note: Reads entire turns list and rewrites it. Consider using backend's
+        append_to_list for better efficiency with large turn counts.
+        """
+        try:
+            # Get current turns
+            doc = await self._backend.get("conversations", conv_id)
+            if doc is None:
+                return
+
+            turns = doc.get("turns", []) + [job_id]
+            await self._backend.update(
+                "conversations",
+                conv_id,
+                {"turns": turns, "updated_at": datetime.now(timezone.utc)},
+            )
+            await self._notifications.notify(f"conversation:{conv_id}")
+        except Exception as e:
+            logger.error(f"Failed to append turn to conversation {conv_id}: {e}")
+            raise
 
     async def patch(
         self,
@@ -128,11 +141,15 @@ class ConversationStore:
         summary: str | None = None,
     ) -> None:
         """Update mutable fields. Only non-None values overwrite."""
-        update: dict[str, object] = {"updated_at": datetime.now(timezone.utc)}
-        if session_id is not None:
-            update["session_id"] = session_id
-        if summary is not None:
-            update["summary"] = summary
+        try:
+            update: dict[str, object] = {"updated_at": datetime.now(timezone.utc)}
+            if session_id is not None:
+                update["session_id"] = session_id
+            if summary is not None:
+                update["summary"] = summary
 
-        await self._backend.update("conversations", conv_id, update)
-        await self._notifications.notify(f"conversation:{conv_id}")
+            await self._backend.update("conversations", conv_id, update)
+            await self._notifications.notify(f"conversation:{conv_id}")
+        except Exception as e:
+            logger.error(f"Failed to patch conversation {conv_id}: {e}")
+            raise

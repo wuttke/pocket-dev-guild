@@ -140,7 +140,7 @@ async def _conversation_event_stream(
             {"conversation": info.model_dump(mode="json"), "busy": busy}
         )
 
-    state = conversations.state(conversation_id)
+    state = await conversations.state(conversation_id)
     if state is None:
         yield {"event": "error", "data": "Conversation not found"}
         return
@@ -150,7 +150,7 @@ async def _conversation_event_stream(
 
     while True:
         await conversations.wait_for_update(conversation_id, timeout=15.0)
-        state = conversations.state(conversation_id)
+        state = await conversations.state(conversation_id)
         if state is None:
             yield {"event": "error", "data": "Conversation gone"}
             return
