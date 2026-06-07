@@ -31,17 +31,20 @@ The application is designed to be accessed primarily via mobile devices, with re
 
 ### Existing Frontend
 - **Location**: `static/index.html`
-- **Size**: ~130 lines of vanilla JavaScript
+- **Size**: ~260 lines of vanilla JavaScript
 - **Features**:
   - Repository selection dropdown
-  - Worktree management (list, create)
-  - Single job submission
+  - Worktree management (list, create, **delete**)
+  - **Conversation support** (create, list, send turns, real-time updates via SSE)
+  - Single job submission (one-shot mode)
   - Real-time log streaming via SSE
+  - Support for creating new branches or checking out existing branches
 - **Limitations**:
-  - No conversation support
-  - No job history
+  - No job history/list view
+  - No pagination for conversations or jobs
   - No mobile optimization
   - Basic UI with minimal styling
+  - No conversation archiving
 
 ### Tech Stack (Current)
 - Vanilla JavaScript (ES6+)
@@ -112,6 +115,9 @@ List all worktrees for a repository.
 ##### `POST /repos/{repo_id}/worktrees`
 Create a new worktree.
 
+**Query Parameters**:
+- `existing` (optional, boolean): Set to `true` to check out an existing branch instead of creating a new one. Default: `false`.
+
 **Request Body**:
 ```json
 {
@@ -122,15 +128,26 @@ Create a new worktree.
 **Response**: `200 OK`
 ```json
 {
-  "name": "feature_new-feature",
-  "path": "/home/user/repos/my-project-worktrees/feature_new-feature"
+  "name": "feature_new_feature",
+  "path": "/home/user/repos/my-project-worktrees/feature_new_feature"
 }
 ```
 
 **Notes**:
-- Branch name must follow pattern: `^[a-z]+(/[a-z0-9-]+)+$`
-- Worktree directory name is derived by replacing `/` with `_`
-- Automatically branches from the default remote branch (usually `origin/main`)
+- **Branch name pattern**: `^[A-Za-z]+(/[A-Za-z0-9.-]+)+$`
+  - First segment: letters only (e.g., `feature`, `Hotfix`, `release`)
+  - Subsequent segments: letters, digits, dashes, and dots (e.g., `2.5.x`, `foo-bar`)
+  - Valid examples: `feature/auth`, `Hotfix/critical-bug`, `release/2.5.x`
+- **Worktree directory naming**:
+  - Derived by lowercasing the branch name and replacing `/` and `.` with `_`
+  - Example: `Feature/Auth` → `feature_auth`, `release/2.5.x` → `release_2_5_x`
+  - This ensures case-insensitive filesystems handle `Feature/Foo` and `feature/foo` as the same worktree
+- **Creating new branches** (`existing=false`, default):
+  - Automatically branches from the default remote branch (usually `origin/main`)
+  - Fails if branch already exists
+- **Checking out existing branches** (`existing=true`):
+  - Checks out an existing local or remote-tracking branch
+  - Fails if branch doesn't exist
 
 ##### `DELETE /repos/{repo_id}/worktrees/{name}`
 Remove a worktree.
@@ -279,6 +296,11 @@ List all conversations with optional filtering.
 **Query Parameters**:
 - `repo_id` (optional): Filter by repository
 
+**TODO (Backend)**:
+- [ ] Add pagination support (`limit`, `offset` or `cursor`)
+- [ ] Add more filters (`status`, `worktree`, `updated_since`)
+- [ ] Add sorting options (`created_at`, `updated_at`, `title`)
+
 **Response**: `200 OK`
 ```json
 [
@@ -358,6 +380,46 @@ Add a new turn to an existing conversation.
 
 The `busy` flag indicates whether a turn is currently in progress.
 
+**TODO (Backend)**:
+- [ ] Add `DELETE /conversations/{conversation_id}` endpoint for archiving conversations
+- [ ] Add `archived` field to `ConversationInfo` to mark archived conversations
+- [ ] Add `archived` filter to `GET /conversations` endpoint
+
+### Missing Endpoints
+
+#### `GET /jobs`
+**TODO (Backend)**: Implement paginated job list endpoint.
+
+**Proposed Query Parameters**:
+- `limit` (optional, default: 20): Number of jobs per page
+- `offset` (optional, default: 0): Starting position
+- `repo_id` (optional): Filter by repository
+- `status` (optional): Filter by status (`queued`, `running`, `finished`, `failed`)
+- `conversation_id` (optional): Filter by conversation
+- `sort` (optional, default: `created_at_desc`): Sorting order
+
+**Proposed Response**: `200 OK`
+```json
+{
+  "jobs": [
+    {
+      "id": "job-123",
+      "repo_id": "my-project",
+      "worktree": "feature_auth",
+      "prompt": "Add unit tests...",
+      "status": "finished",
+      "returncode": 0,
+      "created_at": "2026-06-07T10:00:00Z",
+      "finished_at": "2026-06-07T10:05:00Z",
+      "conversation_id": "conv-abc"
+    }
+  ],
+  "total": 150,
+  "limit": 20,
+  "offset": 0
+}
+```
+
 ---
 
 ## Data Structures
@@ -384,7 +446,12 @@ interface WorktreeInfo {
 }
 
 interface WorktreeCreate {
-  branch: string;             // Matches ^[a-z]+(/[a-z0-9-]+)+$
+  branch: string;             // Matches ^[A-Za-z]+(/[A-Za-z0-9.-]+)+$
+}
+
+// Query parameter for creating worktrees
+interface WorktreeCreateParams {
+  existing?: boolean;         // true = checkout existing branch, false = create new (default)
 }
 
 interface WorktreeCreated {
@@ -730,55 +797,40 @@ Legend:
 └──────────────────────────┘
 ```
 
-### Component Library Recommendations
+### Tech Stack: Vite + React + TypeScript
 
-#### Option 1: Minimal (Vanilla + Tailwind CSS)
-- **Tailwind CSS**: Utility-first CSS framework
-- **Alpine.js** (optional): Lightweight reactivity
-- **No build step** required with CDN
-- **Pros**: Fast, small bundle, easy to learn
-- **Cons**: Manual state management
-
-```html
-<!-- Example with Tailwind + Alpine -->
-<div x-data="{ open: false }">
-  <button @click="open = !open"
-          class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
-    Toggle
-  </button>
-  <div x-show="open" class="mt-2 p-4 bg-gray-100 rounded">
-    Content
-  </div>
-</div>
-```
-
-#### Option 2: Modern SPA (Vite + Svelte)
-- **Vite**: Fast build tool
-- **Svelte**: Compile-time framework (small runtime)
+**Required Stack**:
+- **Vite**: Fast build tool with HMR
+- **React 18**: Component-based UI library
 - **TypeScript**: Type safety
-- **Pros**: Component-based, reactive, great DX
-- **Cons**: Build step required
+- **TanStack Query** (React Query): Server state management, caching, and synchronization
+- **Tailwind CSS**: Utility-first CSS framework
+- **Shadcn/ui**: High-quality, accessible React components built on Radix UI
 
-```svelte
-<!-- Example Svelte component -->
-<script lang="ts">
-  let count = 0;
-  $: doubled = count * 2;
-</script>
+**Additional Libraries**:
+- **React Router**: Client-side routing
+- **Zustand**: Lightweight client state management
+- **ansi-to-react**: ANSI escape sequence rendering for logs
+- **date-fns**: Date formatting and manipulation
 
-<button on:click={() => count++}>
-  Count: {count} (doubled: {doubled})
-</button>
+**Setup**:
+```bash
+# Create Vite + React + TypeScript project
+npm create vite@latest pocket-dev-guild-ui -- --template react-ts
+cd pocket-dev-guild-ui
+
+# Install dependencies
+npm install
+npm install @tanstack/react-query react-router-dom zustand
+npm install -D tailwindcss postcss autoprefixer
+npm install ansi-to-react date-fns
+
+# Initialize Tailwind
+npx tailwindcss init -p
+
+# Install Shadcn/ui
+npx shadcn-ui@latest init
 ```
-
-#### Option 3: React Ecosystem (Vite + React)
-- **Vite + React**: Industry standard
-- **React Query**: Server state management
-- **Tailwind CSS**: Styling
-- **Pros**: Large ecosystem, familiar to many
-- **Cons**: Larger bundle size
-
-**Recommendation**: Start with **Option 1** for MVP, migrate to **Option 2** (Svelte) if complexity grows.
 
 ### Mobile-Specific Features
 
@@ -863,299 +915,322 @@ const job = await JobsService.createJob({
 console.log(job.job_id); // Type: string
 ```
 
-### 2. State Management
+### 2. State Management with Zustand
 
-#### For Vanilla JS (Simple)
-Use a simple reactive store:
-
-```javascript
-// store.js
-class Store {
-  constructor(initialState = {}) {
-    this.state = initialState;
-    this.listeners = [];
-  }
-
-  getState() {
-    return this.state;
-  }
-
-  setState(newState) {
-    this.state = { ...this.state, ...newState };
-    this.listeners.forEach(listener => listener(this.state));
-  }
-
-  subscribe(listener) {
-    this.listeners.push(listener);
-    return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
-    };
-  }
-}
-
-// Usage
-const store = new Store({ repos: [], jobs: [] });
-
-store.subscribe((state) => {
-  console.log('State updated:', state);
-  renderUI(state);
-});
-
-store.setState({ repos: [{ id: '1', name: 'Project' }] });
-```
-
-#### For Svelte (Built-in)
-Svelte has built-in reactivity, no external store needed:
-
-```svelte
-<script lang="ts">
-  import { writable } from 'svelte/store';
-
-  const jobs = writable<JobInfo[]>([]);
-
-  // Subscribe to changes
-  jobs.subscribe(value => {
-    console.log('Jobs updated:', value);
-  });
-
-  // Update store
-  jobs.update(j => [...j, newJob]);
-</script>
-```
-
-### 3. ANSI Escape Sequence Handling
-
-Agent output contains ANSI color codes. Three options:
-
-#### Option A: Strip on Server (Simplest)
-Modify `SubprocessAugmentRunner._pump` to remove ANSI codes:
-
-```python
-import re
-
-ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
-
-async def _pump(self, stream, stream_name):
-    async for line_bytes in stream:
-        line = line_bytes.decode('utf-8', errors='replace')
-        # Remove ANSI codes
-        line = ANSI_ESCAPE.sub('', line)
-        await self._store.append_log(self._job_id, stream_name, line)
-```
-
-#### Option B: Render in Browser (Best UX)
-Use a library like `ansi-to-html`:
-
-```bash
-npm install ansi-to-html
-```
-
-```javascript
-import AnsiToHtml from 'ansi-to-html';
-
-const convert = new AnsiToHtml({
-  fg: '#FFF',
-  bg: '#000',
-  newline: true,
-  escapeXML: true
-});
-
-// Convert ANSI to HTML
-const html = convert.toHtml(logLine.line);
-logElement.innerHTML += html;
-```
-
-**Recommendation**: Use **Option B** for production (preserves colors), **Option A** for quick MVP.
-
-### 4. Error Handling
+Use **Zustand** for lightweight client state (UI state, selected repo, etc.) and **TanStack Query** for server state (API data).
 
 ```typescript
-// API wrapper with error handling
-async function apiCall<T>(fn: () => Promise<T>): Promise<T | null> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (error instanceof Response) {
-      const text = await error.text();
-      console.error(`API Error ${error.status}:`, text);
+// stores/appStore.ts
+import { create } from 'zustand';
 
-      // Show user-friendly message
-      if (error.status === 404) {
-        showToast('Resource not found');
-      } else if (error.status === 409) {
-        showToast('Conflict: ' + text);
-      } else {
-        showToast('Request failed: ' + text);
-      }
-    } else {
-      console.error('Network error:', error);
-      showToast('Network error. Check connection.');
-    }
-    return null;
-  }
+interface AppState {
+  selectedRepoId: string | null;
+  selectedWorktree: string | null;
+  selectedConversationId: string | null;
+  setSelectedRepo: (repoId: string) => void;
+  setSelectedWorktree: (worktree: string | null) => void;
+  setSelectedConversation: (conversationId: string | null) => void;
 }
 
-// Usage
-const job = await apiCall(() =>
-  JobsService.createJob({ repo_id, worktree, prompt })
-);
-if (job) {
-  navigateToJobLog(job.job_id);
+export const useAppStore = create<AppState>((set) => ({
+  selectedRepoId: null,
+  selectedWorktree: null,
+  selectedConversationId: null,
+  setSelectedRepo: (repoId) => set({ selectedRepoId: repoId }),
+  setSelectedWorktree: (worktree) => set({ selectedWorktree: worktree }),
+  setSelectedConversation: (conversationId) => set({ selectedConversationId: conversationId }),
+}));
+```
+
+**TanStack Query** for server state:
+```typescript
+// hooks/useRepos.ts
+import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '../api/client';
+
+export function useRepos() {
+  return useQuery({
+    queryKey: ['repos'],
+    queryFn: () => apiClient.repos.list(),
+  });
+}
+
+// hooks/useConversations.ts
+export function useConversations(repoId?: string) {
+  return useQuery({
+    queryKey: ['conversations', repoId],
+    queryFn: () => apiClient.conversations.list({ repo_id: repoId }),
+    enabled: !!repoId,
+  });
+}
+```
+
+### 3. ANSI Escape Sequence Handling with ansi-to-react
+
+Agent output contains ANSI color codes. Use **ansi-to-react** to render them properly:
+
+```bash
+npm install ansi-to-react
+```
+
+```typescript
+// components/LogViewer.tsx
+import Ansi from 'ansi-to-react';
+
+interface LogViewerProps {
+  logs: LogLine[];
+}
+
+export function LogViewer({ logs }: LogViewerProps) {
+  return (
+    <div className="bg-black text-white p-4 rounded font-mono text-sm overflow-auto max-h-[70vh]">
+      {logs.map((log, idx) => (
+        <div key={idx} className={log.stream === 'stderr' ? 'text-red-400' : ''}>
+          <Ansi>{log.line}</Ansi>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+**Benefits**:
+- Preserves colors and formatting
+- Properly escapes HTML to prevent XSS
+- Works seamlessly with React
+- Handles all ANSI escape sequences (colors, bold, etc.)
+
+### 4. Error Handling with React Query
+
+TanStack Query handles errors automatically with retry logic and error states:
+
+```typescript
+// hooks/useCreateJob.ts
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '../api/client';
+import { toast } from 'sonner'; // or your preferred toast library
+
+export function useCreateJob() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: JobCreate) => apiClient.jobs.create(data),
+    onSuccess: (job) => {
+      // Invalidate job list to refetch
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success(`Job ${job.job_id} started`);
+    },
+    onError: (error: Error) => {
+      console.error('Failed to create job:', error);
+      toast.error(`Failed to start job: ${error.message}`);
+    },
+  });
+}
+
+// Usage in component
+function JobForm() {
+  const createJob = useCreateJob();
+
+  const handleSubmit = (data: JobCreate) => {
+    createJob.mutate(data);
+  };
+
+  return (
+    <div>
+      {createJob.isPending && <Spinner />}
+      {createJob.isError && <Alert variant="destructive">{createJob.error.message}</Alert>}
+      {/* ... form ... */}
+    </div>
+  );
 }
 ```
 
 ### 5. Performance Optimizations
 
-#### Lazy Loading
-```javascript
-// Load job logs only when needed
-async function openJobDetail(jobId) {
-  showLoadingSpinner();
+#### React Query Caching
+TanStack Query automatically caches and deduplicates requests:
 
-  const [job, log] = await Promise.all([
-    fetch(`/jobs/${jobId}`).then(r => r.json()),
-    fetch(`/jobs/${jobId}/log`).then(r => r.json())
-  ]);
-
-  hideLoadingSpinner();
-  renderJobDetail(job, log);
-}
+```typescript
+// Shared cache across components
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // 5 minutes
+      gcTime: 1000 * 60 * 10,   // 10 minutes (formerly cacheTime)
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 ```
 
-#### Virtual Scrolling
-For long logs (1000+ lines), use virtual scrolling:
+#### Virtual Scrolling with react-window
+For long logs (1000+ lines):
 
 ```bash
-npm install react-window  # or svelte-virtual-list
+npm install react-window
 ```
 
-```javascript
-// Only render visible log lines
+```typescript
 import { FixedSizeList } from 'react-window';
 
-<FixedSizeList
-  height={600}
-  itemCount={logLines.length}
-  itemSize={24}
-  width="100%"
->
-  {({ index, style }) => (
-    <div style={style}>{logLines[index]}</div>
-  )}
-</FixedSizeList>
-```
-
-#### Debounce Search
-```javascript
-function debounce(fn, delay) {
-  let timeoutId;
-  return function(...args) {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => fn(...args), delay);
-  };
-}
-
-// Usage for search input
-const searchJobs = debounce((query) => {
-  // Perform search
-  const results = jobs.filter(j =>
-    j.prompt.toLowerCase().includes(query.toLowerCase())
+function LogViewer({ logs }: { logs: LogLine[] }) {
+  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => (
+    <div style={style} className="font-mono">
+      <Ansi>{logs[index].line}</Ansi>
+    </div>
   );
-  renderResults(results);
-}, 300);
+
+  return (
+    <FixedSizeList
+      height={600}
+      itemCount={logs.length}
+      itemSize={24}
+      width="100%"
+    >
+      {Row}
+    </FixedSizeList>
+  );
+}
 ```
 
-### 6. Accessibility (a11y)
+#### Debounced Search with useDeferredValue
+```typescript
+import { useState, useDeferredValue } from 'react';
 
-```html
-<!-- Semantic HTML -->
-<nav aria-label="Main navigation">
-  <button aria-label="Repositories" aria-current="page">
-    <span aria-hidden="true">🏠</span>
-    <span>Repos</span>
-  </button>
-</nav>
+function SearchableList({ items }: { items: string[] }) {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
 
-<!-- Keyboard navigation -->
-<div role="listbox" aria-label="Worktrees">
-  <div role="option" tabindex="0" aria-selected="false">
-    feature/new-ui
-  </div>
-</div>
+  const filtered = items.filter(item =>
+    item.toLowerCase().includes(deferredQuery.toLowerCase())
+  );
 
-<!-- Screen reader announcements -->
-<div role="status" aria-live="polite" aria-atomic="true">
-  Job started successfully
-</div>
-
-<!-- Loading states -->
-<button aria-busy="true" disabled>
-  <span class="spinner" aria-hidden="true"></span>
-  Loading...
-</button>
+  return (
+    <div>
+      <input value={query} onChange={e => setQuery(e.target.value)} />
+      <ul>{filtered.map(item => <li key={item}>{item}</li>)}</ul>
+    </div>
+  );
+}
 ```
+
+### 6. Accessibility with Shadcn/ui
+
+Shadcn/ui components are built on **Radix UI**, which provides accessible primitives out of the box:
+
+```typescript
+// components/ConversationList.tsx
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+function ConversationList({ conversations }: { conversations: ConversationInfo[] }) {
+  return (
+    <div>
+      <Select aria-label="Select conversation">
+        <SelectTrigger>
+          <SelectValue placeholder="Select a conversation" />
+        </SelectTrigger>
+        <SelectContent>
+          {conversations.map((conv) => (
+            <SelectItem key={conv.id} value={conv.id}>
+              {conv.title || conv.summary || conv.id.slice(0, 8)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Button variant="default" aria-label="Create new conversation">
+        New Conversation
+      </Button>
+    </div>
+  );
+}
+```
+
+**Benefits of Radix UI / Shadcn**:
+- Full keyboard navigation
+- Screen reader support
+- ARIA attributes automatically applied
+- Focus management
+- WCAG 2.1 AA compliant
 
 ### 7. Testing Strategy
 
-#### Unit Tests
-```javascript
-// Test API client
-describe('JobsService', () => {
-  it('creates a job', async () => {
-    const job = await JobsService.createJob({
-      repo_id: 'test',
-      worktree: null,
-      prompt: 'test prompt',
-      conversation_id: null
-    });
-    expect(job.job_id).toBeTruthy();
+#### Unit Tests with Vitest
+```bash
+npm install -D vitest @testing-library/react @testing-library/jest-dom
+```
+
+```typescript
+// __tests__/ConversationList.test.tsx
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { ConversationList } from '@/components/ConversationList';
+
+describe('ConversationList', () => {
+  it('renders conversations', () => {
+    const conversations = [
+      { id: '1', title: 'Test Conversation', /* ... */ },
+    ];
+
+    render(<ConversationList conversations={conversations} />);
+    expect(screen.getByText('Test Conversation')).toBeInTheDocument();
   });
 });
 ```
 
-#### Integration Tests
-```javascript
-// Test SSE handling
-describe('Job log streaming', () => {
-  it('receives log events', (done) => {
-    const es = new EventSource('/jobs/test-123/events');
-    const logs = [];
+#### Component Tests with React Testing Library
+```typescript
+// __tests__/JobForm.test.tsx
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { JobForm } from '@/components/JobForm';
 
-    es.addEventListener('log', (e) => {
-      logs.push(JSON.parse(e.data));
-    });
+it('creates a job on submit', async () => {
+  const queryClient = new QueryClient();
+  render(
+    <QueryClientProvider client={queryClient}>
+      <JobForm />
+    </QueryClientProvider>
+  );
 
-    es.addEventListener('status', (e) => {
-      expect(logs.length).toBeGreaterThan(0);
-      es.close();
-      done();
-    });
+  fireEvent.change(screen.getByLabelText('Prompt'), {
+    target: { value: 'Run tests' },
+  });
+  fireEvent.click(screen.getByText('Start Job'));
+
+  await waitFor(() => {
+    expect(screen.getByText(/Job started/)).toBeInTheDocument();
   });
 });
 ```
 
-#### E2E Tests (Playwright)
-```javascript
-// Test full workflow
-test('create worktree and start job', async ({ page }) => {
-  await page.goto('http://localhost:8000');
+#### E2E Tests with Playwright
+```bash
+npm install -D @playwright/test
+```
+
+```typescript
+// e2e/workflow.spec.ts
+import { test, expect } from '@playwright/test';
+
+test('create conversation and send turn', async ({ page }) => {
+  await page.goto('http://localhost:5173');
 
   // Select repo
-  await page.selectOption('#repo', 'my-project');
+  await page.selectOption('[data-testid="repo-select"]', 'my-project');
 
-  // Create worktree
-  await page.fill('#new-worktree', 'feature/test');
-  await page.click('#create-worktree');
+  // Create conversation
+  await page.fill('[data-testid="conversation-title"]', 'Test Conv');
+  await page.click('[data-testid="create-conversation"]');
 
-  // Wait for worktree to appear
-  await page.waitForSelector('option:has-text("feature_test")');
+  // Send turn
+  await page.fill('[data-testid="prompt"]', 'Add unit tests');
+  await page.click('[data-testid="send-turn"]');
 
-  // Start job
-  await page.fill('#prompt', 'Run tests');
-  await page.click('#run');
-
-  // Verify log appears
-  await page.waitForSelector('#log:has-text("Starting")');
+  // Verify log streaming
+  await expect(page.locator('[data-testid="log-viewer"]')).toContainText('Starting');
 });
 ```
 
@@ -1203,25 +1278,50 @@ app.add_middleware(
 )
 ```
 
-### 3. Input Validation
+### 3. Input Validation with Zod
 
-**Always validate user input** before sending to API:
+**Always validate user input** with Zod schemas:
 
-```javascript
-function validateBranchName(branch) {
-  const pattern = /^[a-z]+\/[a-z0-9-]+$/;
-  if (!pattern.test(branch)) {
-    throw new Error('Branch must follow format: kind/name (e.g., feature/auth)');
-  }
-  return branch;
-}
+```bash
+npm install zod
+```
 
-function validateWorktreeName(name) {
-  const pattern = /^[A-Za-z0-9_-]+$/;
-  if (!pattern.test(name)) {
-    throw new Error('Worktree name can only contain letters, numbers, - and _');
-  }
-  return name;
+```typescript
+// lib/validation.ts
+import { z } from 'zod';
+
+export const branchNameSchema = z.string()
+  .regex(/^[A-Za-z]+\/[A-Za-z0-9.-]+$/, {
+    message: 'Branch must follow format: Kind/name (e.g., feature/auth, release/2.5.x)',
+  });
+
+export const worktreeNameSchema = z.string()
+  .regex(/^[A-Za-z0-9_-]+$/, {
+    message: 'Worktree name can only contain letters, numbers, - and _',
+  });
+
+export const jobCreateSchema = z.object({
+  repo_id: worktreeNameSchema,
+  worktree: worktreeNameSchema.nullable(),
+  prompt: z.string().min(1, 'Prompt is required'),
+  conversation_id: z.string().nullable().optional(),
+});
+
+// Usage in React Hook Form
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+
+function WorktreeForm() {
+  const form = useForm({
+    resolver: zodResolver(z.object({ branch: branchNameSchema })),
+  });
+
+  const onSubmit = (data: { branch: string }) => {
+    // data.branch is validated
+    createWorktree.mutate(data);
+  };
+
+  return <form onSubmit={form.handleSubmit(onSubmit)}>{ /* ... */ }</form>;
 }
 ```
 
@@ -1283,30 +1383,41 @@ async function createJob(data) {
 
 ## Getting Started Checklist
 
-### MVP (Vanilla JS + Tailwind)
-- [ ] Set up Tailwind CSS via CDN or npm
-- [ ] Generate TypeScript types from OpenAPI
-- [ ] Create basic HTML structure with bottom navigation
-- [ ] Implement repo/worktree listing
-- [ ] Implement job creation and log streaming
-- [ ] Add basic error handling and loading states
-- [ ] Test on mobile device (Chrome DevTools device mode)
-- [ ] Add PWA manifest and service worker
-- [ ] Deploy to static host (Netlify, Vercel, GitHub Pages)
+### Setup (Vite + React + TypeScript)
+- [ ] Create Vite + React + TypeScript project
+- [ ] Install dependencies (TanStack Query, React Router, Zustand, Tailwind, Shadcn/ui)
+- [ ] Configure Tailwind CSS
+- [ ] Initialize Shadcn/ui components
+- [ ] Generate TypeScript types from OpenAPI spec
+- [ ] Set up folder structure (components, hooks, api, lib, stores)
 
-### Enhanced (Svelte + Vite)
-- [ ] Set up Vite + Svelte + TypeScript
-- [ ] Generate API client with `openapi-typescript-codegen`
-- [ ] Create component library (Button, Card, List, etc.)
-- [ ] Implement all screens (repos, conversations, jobs, settings)
-- [ ] Add SSE reconnection logic
-- [ ] Implement ANSI-to-HTML log rendering
-- [ ] Add virtual scrolling for long logs
-- [ ] Implement offline support with service worker
-- [ ] Add push notifications (requires backend changes)
-- [ ] Write unit + integration + E2E tests
-- [ ] Optimize bundle size (code splitting, lazy loading)
-- [ ] Deploy with CI/CD pipeline
+### Core Features
+- [ ] Implement API client with generated types
+- [ ] Set up TanStack Query and React Router
+- [ ] Create Zustand store for client state
+- [ ] Implement repository and worktree management
+- [ ] Build conversation list and detail views
+- [ ] Implement job creation with both one-shot and conversation modes
+- [ ] Add SSE log streaming with ansi-to-react
+- [ ] Implement real-time conversation updates via SSE
+- [ ] Add worktree deletion functionality
+
+### UI/UX
+- [ ] Build mobile-first responsive layout (bottom nav on mobile, sidebar on desktop)
+- [ ] Add error handling with toast notifications
+- [ ] Implement loading states (skeletons, spinners)
+- [ ] Add keyboard shortcuts
+- [ ] Implement dark mode support
+- [ ] Test on mobile devices (responsive, touch gestures)
+
+### Polish & Deploy
+- [ ] Add virtual scrolling for long logs (react-window)
+- [ ] Write unit tests (Vitest + React Testing Library)
+- [ ] Write E2E tests (Playwright)
+- [ ] Implement PWA features (manifest, service worker, offline support)
+- [ ] Optimize bundle size (lazy loading, code splitting)
+- [ ] Set up CI/CD pipeline (GitHub Actions, Vercel, Netlify)
+- [ ] Deploy to production
 
 ---
 
@@ -1318,17 +1429,25 @@ async function createJob(data) {
 - [PWA Guides](https://web.dev/progressive-web-apps/)
 
 ### Libraries
+- [React](https://react.dev/)
+- [Vite](https://vitejs.dev/)
+- [TanStack Query](https://tanstack.com/query)
+- [React Router](https://reactrouter.com/)
+- [Zustand](https://zustand-demo.pmnd.rs/)
 - [Tailwind CSS](https://tailwindcss.com/)
-- [Alpine.js](https://alpinejs.dev/)
-- [Svelte](https://svelte.dev/)
+- [Shadcn/ui](https://ui.shadcn.com/)
+- [Radix UI](https://www.radix-ui.com/)
+- [ansi-to-react](https://github.com/nteract/ansi-to-react)
+- [Zod](https://zod.dev/)
+- [React Hook Form](https://react-hook-form.com/)
 - [openapi-typescript-codegen](https://github.com/ferdikoomen/openapi-typescript-codegen)
-- [ansi-to-html](https://github.com/rburns/ansi-to-html)
-- [DOMPurify](https://github.com/cure53/DOMPurify)
 
 ### Tools
-- [Vite](https://vitejs.dev/)
+- [Vitest](https://vitest.dev/)
 - [Playwright](https://playwright.dev/)
+- [React Testing Library](https://testing-library.com/react)
 - [Chrome DevTools](https://developer.chrome.com/docs/devtools/)
+- [React DevTools](https://react.dev/learn/react-developer-tools)
 
 ---
 
