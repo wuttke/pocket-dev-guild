@@ -157,6 +157,24 @@ Remove a worktree.
 }
 ```
 
+**Response**: `409 Conflict` — the worktree still has bound state
+(unarchived conversations and/or queued/running jobs). The detail
+object carries the counts so the UI can render a meaningful prompt:
+```json
+{
+  "detail": {
+    "reason": "worktree_has_active_resources",
+    "worktree": "feature_new-feature",
+    "conversations": 2,
+    "active_jobs": 1,
+    "hint": "Archive the conversations and wait for/cancel active jobs before removing this worktree."
+  }
+}
+```
+Archive the conversations via `DELETE /conversations/{id}` and let
+queued/running jobs finish (or cancel them, once `DELETE /jobs/{id}`
+ships) before retrying the worktree deletion.
+
 #### Jobs
 
 **Note**: Jobs are only created through conversations. There is no standalone job creation endpoint. Use `POST /conversations/{id}/turns` to create jobs within a conversation context.
