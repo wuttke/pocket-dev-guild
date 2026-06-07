@@ -16,7 +16,7 @@ class Settings:
     Reads top-level keys from `config.yaml` once at startup:
       agent_binary       (default "auggie")
       agent_prompt_param (default "--print")
-      mongodb_url        (default "mongodb://localhost:27017")
+      mongodb_url        (default "mongodb://localhost:27017/pocket_dev_guild")
     """
 
     def __init__(self, config_path: Path | str | None = None) -> None:
@@ -29,7 +29,9 @@ class Settings:
             data = yaml.safe_load(self.config_path.read_text()) or {}
         self.agent_binary: str = data.get("agent_binary", "auggie")
         self.agent_prompt_param: str = data.get("agent_prompt_param", "--print")
-        self.mongodb_url: str = data.get("mongodb_url", "mongodb://localhost:27017")
+        self.mongodb_url: str = data.get(
+            "mongodb_url", "mongodb://localhost:27017/pocket_dev_guild"
+        )
 
 
 class RepoRegistry:

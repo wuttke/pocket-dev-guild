@@ -36,7 +36,8 @@ def create_app(
 
     if store is None and settings.mongodb_url:
         mongo_client = AsyncIOMotorClient(settings.mongodb_url)
-        mongo_db = mongo_client["pocket_dev_guild"]
+        # Use database from URL, or default to "pocket_dev_guild"
+        mongo_db = mongo_client.get_default_database() or mongo_client["pocket_dev_guild"]
         mongo_store = MongoJobStore(mongo_db)
         store = mongo_store
     else:
@@ -48,7 +49,9 @@ def create_app(
             mongo_db = mongo_store._db
         else:
             mongo_client = AsyncIOMotorClient(settings.mongodb_url)
-            mongo_db = mongo_client["pocket_dev_guild"]
+            mongo_db = (
+                mongo_client.get_default_database() or mongo_client["pocket_dev_guild"]
+            )
         mongo_conversations = MongoConversationStore(mongo_db)
         conversations_store = mongo_conversations
     else:
