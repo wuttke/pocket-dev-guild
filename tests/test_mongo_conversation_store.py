@@ -203,6 +203,31 @@ async def test_count_respects_archived_filter(mongo_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_filters_by_updated_since(mongo_db) -> None:
+    """`updated_since` is pushed down to Mongo as `{updated_at: {$gte: …}}`
+    and the comparison is inclusive."""
+    store = ConversationStore(backend=MongoBackend(mongo_db))
+
+    a = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="a"
+    )
+    await asyncio.sleep(0.01)
+    b = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="b"
+    )
+    await asyncio.sleep(0.01)
+    c = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="c"
+    )
+
+    items = await store.list(repo_id="demo", updated_since=b.updated_at)
+    assert [x.id for x in items] == [c.id, b.id]
+    assert (
+        await store.count(repo_id="demo", updated_since=b.updated_at) == 2
+    )
+
+
+@pytest.mark.asyncio
 async def test_state_returns_info_and_busy_flag(mongo_db) -> None:
     store = ConversationStore(backend=MongoBackend(mongo_db))
     info = await store.create(

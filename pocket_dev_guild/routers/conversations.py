@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -61,6 +62,7 @@ async def list_conversations(
     repo_id: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
     worktree: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
     include_archived: bool = False,
+    updated_since: datetime | None = None,
     sort: str | None = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -75,6 +77,7 @@ async def list_conversations(
         repo_id=repo_id,
         worktree=worktree,
         include_archived=include_archived,
+        updated_since=updated_since,
         sort=sort_spec,
         limit=limit,
         offset=offset,
@@ -83,6 +86,7 @@ async def list_conversations(
         repo_id=repo_id,
         worktree=worktree,
         include_archived=include_archived,
+        updated_since=updated_since,
     )
     return ConversationListResponse(
         items=items, total=total, limit=limit, offset=offset

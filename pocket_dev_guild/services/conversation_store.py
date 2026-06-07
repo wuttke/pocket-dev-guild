@@ -83,6 +83,7 @@ class ConversationStore:
         repo_id: str | None,
         worktree: str | None,
         include_archived: bool,
+        updated_since: datetime | None = None,
     ) -> dict[str, object]:
         f: dict[str, object] = {}
         if repo_id is not None:
@@ -93,6 +94,14 @@ class ConversationStore:
             # `$ne: True` matches docs missing the field as well — covers
             # pre-archive records that never had `archived` written.
             f["archived"] = {"$ne": True}
+        if updated_since is not None:
+            # Normalize naive datetimes to UTC. `updated_at` is always
+            # stored tz-aware, and naive-vs-aware comparison crashes the
+            # in-memory matcher.
+            since = updated_since
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+            f["updated_at"] = {"$gte": since}
         return f
 
     async def list(
@@ -101,6 +110,7 @@ class ConversationStore:
         *,
         worktree: str | None = None,
         include_archived: bool = False,
+        updated_since: datetime | None = None,
         sort: list[tuple[str, int]] | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -109,6 +119,7 @@ class ConversationStore:
             repo_id=repo_id,
             worktree=worktree,
             include_archived=include_archived,
+            updated_since=updated_since,
         )
         docs = await self._backend.find(
             "conversations",
@@ -125,11 +136,13 @@ class ConversationStore:
         repo_id: str | None = None,
         worktree: str | None = None,
         include_archived: bool = False,
+        updated_since: datetime | None = None,
     ) -> int:
         filter_dict = self._build_filter(
             repo_id=repo_id,
             worktree=worktree,
             include_archived=include_archived,
+            updated_since=updated_since,
         )
         return await self._backend.count(
             "conversations", filter=filter_dict or None

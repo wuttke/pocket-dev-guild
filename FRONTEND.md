@@ -295,13 +295,15 @@ Paginated list of conversations with filtering and sorting.
 - `repo_id` (optional): Filter by repository
 - `worktree` (optional): Filter by worktree name
 - `include_archived` (optional, default `false`): include soft-archived conversations
+- `updated_since` (optional, ISO 8601): keep only conversations whose
+  `updated_at` is `>=` the threshold. Inclusive. Naive timestamps are
+  interpreted as UTC. Useful for polling/delta sync — pass the most
+  recent `updated_at` from the previous response to fetch only what
+  changed.
 - `limit` (optional, default `50`, max `200`)
 - `offset` (optional, default `0`)
 - `sort` (optional, default `-updated_at`): comma-separated list, `-` prefix = desc.
   Allow-list: `updated_at`, `created_at`. Unknown fields → `400`.
-
-**Still open (Backend)**:
-- [ ] Add `updated_since` / status-style filters
 
 **Response**: `200 OK`
 ```json

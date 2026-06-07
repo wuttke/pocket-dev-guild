@@ -45,17 +45,6 @@ and let the UI pick one per job.
   - Response: `{items: [...], total, limit, offset}`
 - [ ] `DELETE /jobs/{job_id}` to cancel/kill running jobs
 
-## Conversations API
-
-✅ **Core endpoints implemented**.
-- [x] `POST /conversations`, `GET /conversations`, `GET /conversations/{id}`
-- [x] `POST /conversations/{id}/turns`, `GET /conversations/{id}/events`
-- [x] `DELETE /conversations/{id}` — soft archive; hides from list, blocks new turns
-- [x] `archived` field on `ConversationInfo`; opt-in via `?include_archived=true`
-- [x] Pagination on `GET /conversations`: `limit`, `offset`, `worktree`, `sort`
-  - Response: `{items: [...], total, limit, offset}`
-- [ ] Add `updated_since` / status-style filters to `GET /conversations`
-
 ## Frontend Rewrite
 
 See **FRONTEND.md** for complete frontend developer guide.

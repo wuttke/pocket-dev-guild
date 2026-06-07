@@ -393,3 +393,73 @@ def test_list_conversations_filter_sort_paginate(
     assert client.get("/conversations?limit=0").status_code == 422
     assert client.get("/conversations?limit=999").status_code == 422
     assert client.get("/conversations?offset=-1").status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_updated_since_filter(tmp_config) -> None:
+    """`updated_since` returns only conversations touched at-or-after the
+    threshold. The cutoff is taken from a freshly-created record's
+    `updated_at` so the comparison is `>=` inclusive."""
+    store = ConversationStore()
+
+    a = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="a"
+    )
+    await asyncio.sleep(0.01)
+    b = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="b"
+    )
+    await asyncio.sleep(0.01)
+    c = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="c"
+    )
+
+    # Inclusive cutoff at b → b and c remain (default sort: newest first).
+    items = await store.list(repo_id="demo", updated_since=b.updated_at)
+    assert [x.id for x in items] == [c.id, b.id]
+    assert await store.count(repo_id="demo", updated_since=b.updated_at) == 2
+
+    # Cutoff after the newest record → empty result.
+    after_c = c.updated_at.replace(microsecond=c.updated_at.microsecond)
+    items = await store.list(
+        repo_id="demo",
+        updated_since=after_c.replace(year=after_c.year + 1),
+    )
+    assert items == []
+
+
+def test_list_conversations_updated_since_query(
+    client: TestClient, tmp_config
+) -> None:
+    """The `updated_since` query parameter accepts ISO 8601 (incl. naive)
+    and threads through to the store filter."""
+    _ensure_worktree(tmp_config)
+
+    first = client.post(
+        "/conversations",
+        json={"repo_id": "demo", "worktree": "feature-a", "title": "old"},
+    ).json()
+    time.sleep(0.01)
+    second = client.post(
+        "/conversations",
+        json={"repo_id": "demo", "worktree": "feature-a", "title": "new"},
+    ).json()
+
+    # ISO 8601 with Z suffix: only `second` (created strictly after first).
+    cutoff = second["updated_at"]
+    body = client.get(f"/conversations?updated_since={cutoff}").json()
+    assert [c["id"] for c in body["items"]] == [second["id"]]
+    assert body["total"] == 1
+
+    # Cutoff at/before first → both rows match.
+    body = client.get(
+        f"/conversations?updated_since={first['updated_at']}"
+    ).json()
+    assert {c["id"] for c in body["items"]} == {first["id"], second["id"]}
+    assert body["total"] == 2
+
+    # Garbage value → 422 from FastAPI.
+    assert (
+        client.get("/conversations?updated_since=not-a-date").status_code
+        == 422
+    )
