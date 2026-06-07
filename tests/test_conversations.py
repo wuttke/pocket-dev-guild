@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
+from pocket_dev_guild.routers.conversations import _conversation_event_stream
 from pocket_dev_guild.schemas import LogLine
+from pocket_dev_guild.services.conversation_store import ConversationStore
 from tests.conftest import FakeRunner
 
 
@@ -190,3 +195,102 @@ def test_jobs_endpoint_accepts_conversation_id(app_factory, tmp_config) -> None:
         assert job["conversation_id"] == conv["id"]
         assert job["session_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         assert job["request_id"] == "11111111-2222-3333-4444-555555555555"
+
+
+
+async def _collect_events(
+    conversations: ConversationStore,
+    conv_id: str,
+    *,
+    stop: callable,
+    timeout: float = 3.0,
+):
+    """Drive `_conversation_event_stream` until `stop(events)` is true.
+
+    Bypasses `TestClient` because `httpx.ASGITransport` buffers the entire
+    response before returning, which deadlocks an infinite SSE generator.
+    """
+    events: list[tuple[str, dict]] = []
+    agen = _conversation_event_stream(conversations, conv_id)
+    deadline = asyncio.get_event_loop().time() + timeout
+    try:
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise AssertionError(f"SSE timeout; got {events}")
+            msg = await asyncio.wait_for(agen.__anext__(), timeout=remaining)
+            events.append((msg["event"], json.loads(msg["data"])))
+            if stop(events):
+                return events
+    finally:
+        await agen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_conversation_events_initial_snapshot() -> None:
+    """The stream emits a `snapshot` event on connect carrying the
+    current `ConversationInfo` plus a `busy` flag."""
+    store = ConversationStore()
+    info = store.create(
+        repo_id="demo", worktree="feature-a", agent_id=None, title="t"
+    )
+
+    events = await _collect_events(store, info.id, stop=lambda evs: len(evs) >= 1)
+
+    assert events[0][0] == "snapshot"
+    payload = events[0][1]
+    assert payload["busy"] is False
+    assert payload["conversation"]["id"] == info.id
+    assert payload["conversation"]["title"] == "t"
+    assert payload["conversation"]["summary"] is None
+
+
+@pytest.mark.asyncio
+async def test_conversation_events_full_flow() -> None:
+    """A busy toggle + summary patch produces snapshot + update events
+    in order, with the final update carrying busy=False + summary."""
+    store = ConversationStore()
+    info = store.create(
+        repo_id="demo", worktree="feature-a", agent_id=None, title=None
+    )
+
+    async def mutate() -> None:
+        await asyncio.sleep(0.01)
+        await store.mark_busy(info.id, True)
+        await asyncio.sleep(0.01)
+        await store.patch(
+            info.id, session_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )
+        await asyncio.sleep(0.01)
+        await store.patch(info.id, summary="Did the thing.")
+        await asyncio.sleep(0.01)
+        await store.mark_busy(info.id, False)
+
+    mutator = asyncio.create_task(mutate())
+    try:
+        events = await _collect_events(
+            store,
+            info.id,
+            stop=lambda evs: (
+                evs[-1][1]["conversation"]["summary"] is not None
+                and not evs[-1][1]["busy"]
+            ),
+        )
+    finally:
+        await mutator
+
+    assert events[0][0] == "snapshot"
+    updates = [(ev, p) for ev, p in events[1:] if ev == "update"]
+    assert updates, "expected at least one update event"
+    assert any(p["busy"] for _, p in updates)
+    last = updates[-1][1]
+    assert last["conversation"]["summary"] == "Did the thing."
+    assert last["conversation"]["session_id"] == (
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    )
+    assert last["busy"] is False
+
+
+def test_conversation_events_404_for_missing(client: TestClient) -> None:
+    resp = client.get("/conversations/does-not-exist/events")
+    assert resp.status_code == 404

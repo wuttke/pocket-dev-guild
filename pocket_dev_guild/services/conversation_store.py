@@ -67,6 +67,23 @@ class ConversationStore:
         record = self._items.get(conv_id)
         return bool(record and record.busy)
 
+    def state(self, conv_id: str) -> tuple[ConversationInfo, bool] | None:
+        """Snapshot info and busy flag atomically (single dict lookup)."""
+        record = self._items.get(conv_id)
+        if record is None:
+            return None
+        return record.info, record.busy
+
+    async def wait_for_update(self, conv_id: str, timeout: float = 5.0) -> None:
+        record = self._items.get(conv_id)
+        if record is None:
+            return
+        async with record.condition:
+            try:
+                await asyncio.wait_for(record.condition.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                pass
+
     async def mark_busy(self, conv_id: str, busy: bool) -> None:
         record = self._items.get(conv_id)
         if record is None:

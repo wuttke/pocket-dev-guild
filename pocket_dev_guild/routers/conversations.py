@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from sse_starlette.sse import EventSourceResponse
 
 from ..config import RepoRegistry
 from ..deps import get_conversations, get_registry, get_runner, get_store
@@ -97,3 +99,63 @@ async def create_turn(
         runner=runner,
         conversations=conversations,
     )
+
+
+@router.get(
+    "/{conversation_id}/events",
+    summary="SSE stream of conversation state changes",
+)
+async def stream_conversation_events(
+    conversation_id: Annotated[str, Path(min_length=1)],
+    conversations: ConversationStore = Depends(get_conversations),
+) -> EventSourceResponse:
+    """Push the full conversation snapshot on every change.
+
+    Emits an initial `snapshot` event, then an `update` event each time
+    the underlying record is mutated (new turn appended, busy flag
+    toggles, session_id resolved, summary refreshed). The payload always
+    carries the entire `ConversationInfo` plus a top-level `busy` flag —
+    the UI diffs against its local copy to figure out what changed.
+    """
+    if conversations.get(conversation_id) is None:
+        raise HTTPException(404, "Conversation not found")
+    return EventSourceResponse(
+        _conversation_event_stream(conversations, conversation_id)
+    )
+
+
+async def _conversation_event_stream(
+    conversations: ConversationStore, conversation_id: str
+):
+    """Yield SSE events for a conversation's lifetime.
+
+    Emits an initial `snapshot`, then an `update` whenever the underlying
+    record or busy flag changes. Extracted from the route so tests can
+    drive it directly without going through `TestClient` (which buffers
+    ASGI responses until the body completes).
+    """
+
+    def _payload(info: ConversationInfo, busy: bool) -> str:
+        return json.dumps(
+            {"conversation": info.model_dump(mode="json"), "busy": busy}
+        )
+
+    state = conversations.state(conversation_id)
+    if state is None:
+        yield {"event": "error", "data": "Conversation not found"}
+        return
+    info, busy = state
+    last_signature = (info.model_dump_json(), busy)
+    yield {"event": "snapshot", "data": _payload(info, busy)}
+
+    while True:
+        await conversations.wait_for_update(conversation_id, timeout=15.0)
+        state = conversations.state(conversation_id)
+        if state is None:
+            yield {"event": "error", "data": "Conversation gone"}
+            return
+        info, busy = state
+        signature = (info.model_dump_json(), busy)
+        if signature != last_signature:
+            last_signature = signature
+            yield {"event": "update", "data": _payload(info, busy)}
