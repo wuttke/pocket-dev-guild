@@ -36,10 +36,30 @@
     </div>
   </div>
 
+  <h2>Conversation</h2>
+  <div class="row">
+    <div>
+      <label>Conversation
+        <select id="conversation"></select>
+      </label>
+      <button id="reload-conversations">neu laden</button>
+    </div>
+    <div>
+      <label>Titel (für neue Conversation)
+        <input id="conversation-title" placeholder="optional" />
+      </label>
+      <button id="new-conversation">Neue Conversation</button>
+    </div>
+  </div>
+  <div id="conversation-info" style="margin-top:0.5rem;font-size:0.9em;color:#555;white-space:pre-wrap;"></div>
+
   <label>Prompt
     <textarea id="prompt" rows="4" placeholder="Was soll augment tun?"></textarea>
   </label>
-  <button id="run">augment starten</button>
+  <div class="row">
+    <button id="run">one-shot starten</button>
+    <button id="send-turn">Turn senden</button>
+  </div>
 
   <h2>Log</h2>
   <pre id="log"></pre>
@@ -132,12 +152,112 @@ async function runAugment() {
   source.addEventListener("error", () => source.close());
 }
 
-$("repo").addEventListener("change", loadWorktrees);
+function renderConversationInfo(info, busy) {
+  const el = $("conversation-info");
+  if (!info) { el.textContent = ""; return; }
+  const lines = [
+    `id: ${info.id}`,
+    `title: ${info.title || "—"}`,
+    `worktree: ${info.worktree || "<primary>"}`,
+    `turns: ${info.turns.length}  busy: ${busy}`,
+    `session_id: ${info.session_id || "—"}`,
+    `summary: ${info.summary || "—"}`,
+  ];
+  el.textContent = lines.join("\n");
+}
+
+let conversationSource = null;
+function openConversationStream(conversationId) {
+  if (conversationSource) conversationSource.close();
+  if (!conversationId) { renderConversationInfo(null, false); return; }
+  conversationSource = new EventSource(`/conversations/${conversationId}/events`);
+  const onPayload = (event) => {
+    const data = JSON.parse(event.data);
+    renderConversationInfo(data.conversation, data.busy);
+  };
+  conversationSource.addEventListener("snapshot", onPayload);
+  conversationSource.addEventListener("update", onPayload);
+  conversationSource.addEventListener("error", () => {});
+}
+
+async function loadConversations(preferId) {
+  const repoId = $("repo").value;
+  if (!repoId) return;
+  const r = await fetch(`/conversations?repo_id=${repoId}`).then(r => r.json());
+  r.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  $("conversation").innerHTML = [
+    `<option value="">— keine —</option>`,
+    ...r.map(c => {
+      const label = c.title || c.summary || c.id.slice(0, 8);
+      const wt = c.worktree || "<primary>";
+      return `<option value="${c.id}">${label} · ${wt} · ${c.turns.length}t</option>`;
+    }),
+  ].join("");
+  if (preferId && r.some(c => c.id === preferId)) {
+    $("conversation").value = preferId;
+  }
+  openConversationStream($("conversation").value);
+}
+
+async function newConversation() {
+  const repoId = $("repo").value;
+  const worktree = $("worktree").value || null;
+  const title = $("conversation-title").value.trim() || null;
+  const res = await fetch(`/conversations`, {
+    method: "POST",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify({repo_id: repoId, worktree, title}),
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  const info = await res.json();
+  $("conversation-title").value = "";
+  await loadConversations(info.id);
+}
+
+async function sendTurn() {
+  const conversationId = $("conversation").value;
+  if (!conversationId) { alert("Keine Conversation gewählt."); return; }
+  const prompt = $("prompt").value;
+  if (!prompt) return;
+  const res = await fetch(`/conversations/${conversationId}/turns`, {
+    method: "POST",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify({prompt}),
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  const {job_id} = await res.json();
+  const startedAt = Date.now();
+  log.textContent = `--- Turn ${job_id} started ${new Date(startedAt).toISOString()} ---\n`;
+  if (source) source.close();
+  source = new EventSource(`/jobs/${job_id}/events`);
+  source.addEventListener("log", (event) => {
+    const entry = JSON.parse(event.data);
+    log.textContent += `[${entry.stream}] ${entry.line}`;
+    log.scrollTop = log.scrollHeight;
+  });
+  source.addEventListener("status", (event) => {
+    const status = JSON.parse(event.data);
+    const finishedAt = status.finished_at ? Date.parse(status.finished_at) : Date.now();
+    const durationS = ((finishedAt - startedAt) / 1000).toFixed(1);
+    log.textContent += `\n--- Turn ${status.status} (rc=${status.returncode}) after ${durationS}s ---\n`;
+    source.close();
+  });
+  source.addEventListener("error", () => source.close());
+}
+
+$("repo").addEventListener("change", async () => {
+  await loadWorktrees();
+  await loadConversations();
+});
 $("reload").addEventListener("click", loadWorktrees);
 $("create-worktree").addEventListener("click", createWorktree);
 $("delete-worktree").addEventListener("click", deleteWorktree);
 $("run").addEventListener("click", runAugment);
-loadRepos();
+$("reload-conversations").addEventListener("click", () => loadConversations());
+$("new-conversation").addEventListener("click", newConversation);
+$("conversation").addEventListener("change", () => openConversationStream($("conversation").value));
+$("send-turn").addEventListener("click", sendTurn);
+(async () => { await loadRepos(); await loadConversations(); })();
 </script>
 </body>
 </html>
