@@ -6,7 +6,6 @@ Thread-unsafe on purpose, lives entirely on the asyncio event loop.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -45,7 +44,7 @@ class ConversationStore:
                 ],
             )
 
-    def create(
+    async def create(
         self,
         repo_id: str,
         worktree: str | None,
@@ -66,14 +65,7 @@ class ConversationStore:
             updated_at=now,
             turns=[],
         )
-        # Store in backend with error handling
-        async def _insert_with_logging():
-            try:
-                await self._backend.insert("conversations", info.model_dump(mode="json"))
-            except Exception as e:
-                logger.error(f"Failed to persist conversation {conv_id}: {e}")
-
-        asyncio.create_task(_insert_with_logging())
+        await self._backend.insert("conversations", info.model_dump(mode="json"))
         return info
 
     async def get(self, conv_id: str) -> ConversationInfo | None:

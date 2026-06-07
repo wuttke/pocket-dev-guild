@@ -26,7 +26,7 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
 @router.post("", response_model=ConversationInfo, summary="Start a conversation")
-def create_conversation(
+async def create_conversation(
     body: ConversationCreate,
     registry: RepoRegistry = Depends(get_registry),
     conversations: ConversationStore = Depends(get_conversations),
@@ -40,7 +40,7 @@ def create_conversation(
             raise HTTPException(
                 404, f"Worktree '{body.worktree}' not found at {target}"
             )
-    return conversations.create(
+    return await conversations.create(
         repo_id=body.repo_id,
         worktree=body.worktree,
         agent_id=body.agent_id,
@@ -117,7 +117,7 @@ async def stream_conversation_events(
     carries the entire `ConversationInfo` plus a top-level `busy` flag —
     the UI diffs against its local copy to figure out what changed.
     """
-    if conversations.get(conversation_id) is None:
+    if await conversations.get(conversation_id) is None:
         raise HTTPException(404, "Conversation not found")
     return EventSourceResponse(
         _conversation_event_stream(conversations, conversation_id)

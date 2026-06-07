@@ -231,7 +231,7 @@ async def test_conversation_events_initial_snapshot() -> None:
     """The stream emits a `snapshot` event on connect carrying the
     current `ConversationInfo` plus a `busy` flag."""
     store = ConversationStore()
-    info = store.create(
+    info = await store.create(
         repo_id="demo", worktree="feature-a", agent_id=None, title="t"
     )
 
@@ -250,7 +250,7 @@ async def test_conversation_events_full_flow() -> None:
     """A busy toggle + summary patch produces snapshot + update events
     in order, with the final update carrying busy=False + summary."""
     store = ConversationStore()
-    info = store.create(
+    info = await store.create(
         repo_id="demo", worktree="feature-a", agent_id=None, title=None
     )
 

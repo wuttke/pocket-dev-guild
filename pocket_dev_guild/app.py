@@ -34,33 +34,33 @@ def create_app(
     # Shared notification hub for real-time SSE updates
     notifications = NotificationHub()
 
-    # Initialize storage backend and stores
-    mongo_store = None
-    mongo_backend = None
+    # Initialize storage backend and stores. Mongo is opt-in via
+    # `mongodb_url` in config.yaml; without it everything stays in-memory.
+    mongo_store: MongoJobStore | None = None
+    mongo_backend: MongoBackend | None = None
 
     if settings.mongodb_url:
         mongo_client = AsyncIOMotorClient(settings.mongodb_url)
-        # Use database from URL, or default to "pocket_dev_guild"
-        mongo_db = mongo_client.get_default_database() or mongo_client["pocket_dev_guild"]
+        # `get_default_database()` raises ConfigurationError when the URL
+        # carries no /<db> segment; in pymongo 4.x we cannot use the
+        # `or` trick because `bool(Database)` raises NotImplementedError.
+        try:
+            mongo_db = mongo_client.get_default_database()
+        except Exception:
+            mongo_db = mongo_client["pocket_dev_guild"]
         mongo_backend = MongoBackend(mongo_db)
+        if store is None:
+            mongo_store = MongoJobStore(mongo_db, notifications=notifications)
+            store = mongo_store
 
-    # Initialize job store (still has MongoDB-specific implementation)
-    if store is None and mongo_backend:
-        mongo_store = MongoJobStore(mongo_db, notifications=notifications)
-        store = mongo_store
-    else:
-        store = store or JobStore(notifications=notifications)
+    if store is None:
+        store = JobStore(notifications=notifications)
 
-    # Initialize conversation store with pluggable backend
     if conversations_store is None:
         backend = mongo_backend if mongo_backend else InMemoryBackend()
         conversations_store = ConversationStore(
             backend=backend, notifications=notifications
         )
-
-    # Store mongo_backend reference for index creation
-    if mongo_backend:
-        mongo_conversations = conversations_store
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
