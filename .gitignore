@@ -24,3 +24,6 @@ htmlcov/
 .idea/
 *.swp
 .DS_Store
+
+# local config (use config.example.yaml as template)
+/config.yaml

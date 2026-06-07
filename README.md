@@ -12,12 +12,8 @@ uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 
 # point config.yaml at your real repos
-cat > config.yaml <<'YAML'
-repos:
-  - id: my-project
-    name: my-project
-    path: /absolute/path/to/my-project
-YAML
+cp config.example.yaml config.yaml
+$EDITOR config.yaml
 
 .venv/bin/uvicorn main:app --reload
 ```
