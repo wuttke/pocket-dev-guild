@@ -12,6 +12,7 @@ from fastapi import Depends, HTTPException, Path, Request
 from .config import RepoRegistry
 from .schemas import IDENT_PATTERN, Repo
 from .services.augment_runner import AugmentRunner
+from .services.conversation_store import ConversationStore
 from .services.git_service import GitService
 from .services.job_store import JobStore
 
@@ -30,6 +31,10 @@ def get_store(request: Request) -> JobStore:
 
 def get_runner(request: Request) -> AugmentRunner:
     return request.app.state.runner
+
+
+def get_conversations(request: Request) -> ConversationStore:
+    return request.app.state.conversations
 
 
 def get_repo(

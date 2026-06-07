@@ -23,7 +23,14 @@ class JobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, _JobRecord] = {}
 
-    def create(self, repo_id: str, worktree: str | None, prompt: str) -> JobInfo:
+    def create(
+        self,
+        repo_id: str,
+        worktree: str | None,
+        prompt: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> JobInfo:
         job_id = uuid.uuid4().hex
         info = JobInfo(
             id=job_id,
@@ -33,6 +40,7 @@ class JobStore:
             status="queued",
             returncode=None,
             created_at=datetime.now(timezone.utc),
+            conversation_id=conversation_id,
         )
         self._jobs[job_id] = _JobRecord(info=info)
         return info
@@ -66,6 +74,28 @@ class JobStore:
         update: dict[str, object] = {"status": status, "returncode": returncode}
         if status in ("finished", "failed"):
             update["finished_at"] = datetime.now(timezone.utc)
+        record.info = record.info.model_copy(update=update)
+        async with record.condition:
+            record.condition.notify_all()
+
+    async def set_session_meta(
+        self,
+        job_id: str,
+        *,
+        request_id: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        """Patch agent-side ids onto the job. Only non-None values overwrite."""
+        record = self._jobs.get(job_id)
+        if record is None:
+            return
+        update: dict[str, object] = {}
+        if request_id is not None:
+            update["request_id"] = request_id
+        if session_id is not None:
+            update["session_id"] = session_id
+        if not update:
+            return
         record.info = record.info.model_copy(update=update)
         async with record.condition:
             record.condition.notify_all()

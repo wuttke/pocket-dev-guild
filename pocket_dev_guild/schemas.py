@@ -63,6 +63,7 @@ class JobCreate(BaseModel):
     repo_id: str = Field(pattern=IDENT_PATTERN)
     worktree: str | None = Field(default=None, pattern=IDENT_PATTERN)
     prompt: str
+    conversation_id: str | None = None
 
 
 class JobCreated(BaseModel):
@@ -78,6 +79,12 @@ class JobInfo(BaseModel):
     returncode: int | None = None
     created_at: datetime
     finished_at: datetime | None = None
+    conversation_id: str | None = None
+    # Populated by the runner while streaming `--print` output. `request_id`
+    # is the per-turn id auggie prints to stdout; `session_id` is the
+    # agent-side conversation id (only set for conversation-bound jobs).
+    request_id: str | None = None
+    session_id: str | None = None
 
 
 class LogLine(BaseModel):
@@ -93,3 +100,28 @@ class JobStatusEvent(BaseModel):
     status: JobStatus
     returncode: int | None = None
     finished_at: datetime | None = None
+
+
+class ConversationCreate(BaseModel):
+    repo_id: str = Field(pattern=IDENT_PATTERN)
+    worktree: str | None = Field(default=None, pattern=IDENT_PATTERN)
+    agent_id: str | None = None
+    title: str | None = None
+
+
+class ConversationTurnCreate(BaseModel):
+    prompt: str
+
+
+class ConversationInfo(BaseModel):
+    id: str
+    repo_id: str
+    worktree: str | None = None
+    agent_id: str | None = None
+    title: str | None = None
+    session_id: str | None = None
+    summary: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    # job ids in turn order; in-flight turn (if any) is the last entry.
+    turns: list[str] = Field(default_factory=list)

@@ -10,12 +10,79 @@ from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import RepoRegistry
-from ..deps import get_registry, get_runner, get_store
+from ..deps import get_conversations, get_registry, get_runner, get_store
 from ..schemas import JobCreate, JobCreated, JobInfo, JobLog
 from ..services.augment_runner import AugmentRunner
+from ..services.conversation_orchestrator import run_conversation_turn
+from ..services.conversation_store import ConversationStore
 from ..services.job_store import JobStore
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+async def start_job(
+    *,
+    repo_id: str,
+    worktree: str | None,
+    prompt: str,
+    conversation_id: str | None,
+    registry: RepoRegistry,
+    store: JobStore,
+    runner: AugmentRunner,
+    conversations: ConversationStore,
+) -> JobCreated:
+    """Validate inputs, persist the job, and schedule its background run.
+
+    Shared between `POST /jobs` and `POST /conversations/{id}/turns`. When
+    `conversation_id` is set, the job is bound to the conversation and the
+    orchestrator handles session discovery + summary; otherwise it's a
+    plain one-shot run.
+    """
+    repo = registry.get(repo_id)
+    if repo is None:
+        raise HTTPException(404, f"Repo '{repo_id}' not found")
+    if worktree is None:
+        target = Path(repo.path)
+    else:
+        target = registry.worktree_path(repo, worktree)
+    if not target.exists():
+        label = worktree if worktree is not None else "<primary>"
+        raise HTTPException(404, f"Worktree '{label}' not found at {target}")
+
+    if conversation_id is not None:
+        conv = conversations.get(conversation_id)
+        if conv is None:
+            raise HTTPException(404, f"Conversation '{conversation_id}' not found")
+        if conv.repo_id != repo_id or conv.worktree != worktree:
+            raise HTTPException(
+                409,
+                "Job repo/worktree does not match the conversation",
+            )
+        if conversations.is_busy(conversation_id):
+            raise HTTPException(
+                409, "Conversation already has a turn in flight"
+            )
+
+    info = store.create(
+        repo_id, worktree, prompt, conversation_id=conversation_id
+    )
+
+    if conversation_id is not None:
+        await conversations.append_turn(conversation_id, info.id)
+        asyncio.create_task(
+            run_conversation_turn(
+                conversation_id=conversation_id,
+                job_id=info.id,
+                cwd=target,
+                prompt=prompt,
+                conversations=conversations,
+                jobs=store,
+                runner=runner,
+            )
+        )
+    else:
+        asyncio.create_task(runner.run(info.id, target, prompt))
+    return JobCreated(job_id=info.id)
 
 
 @router.post("", response_model=JobCreated, summary="Start an augment run")
@@ -24,21 +91,18 @@ async def create_job(
     registry: RepoRegistry = Depends(get_registry),
     store: JobStore = Depends(get_store),
     runner: AugmentRunner = Depends(get_runner),
+    conversations: ConversationStore = Depends(get_conversations),
 ) -> JobCreated:
-    repo = registry.get(body.repo_id)
-    if repo is None:
-        raise HTTPException(404, f"Repo '{body.repo_id}' not found")
-    if body.worktree is None:
-        target = Path(repo.path)
-    else:
-        target = registry.worktree_path(repo, body.worktree)
-    if not target.exists():
-        label = body.worktree if body.worktree is not None else "<primary>"
-        raise HTTPException(404, f"Worktree '{label}' not found at {target}")
-
-    info = store.create(body.repo_id, body.worktree, body.prompt)
-    asyncio.create_task(runner.run(info.id, target, body.prompt))
-    return JobCreated(job_id=info.id)
+    return await start_job(
+        repo_id=body.repo_id,
+        worktree=body.worktree,
+        prompt=body.prompt,
+        conversation_id=body.conversation_id,
+        registry=registry,
+        store=store,
+        runner=runner,
+        conversations=conversations,
+    )
 
 
 @router.get("/{job_id}", response_model=JobInfo, summary="Job metadata")

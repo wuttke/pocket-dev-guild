@@ -46,24 +46,56 @@ class FakeGit(GitService):
 
 @dataclass
 class FakeRunner:
-    """Replays a scripted sequence of log lines + exit code into JobStore."""
+    """Replays a scripted sequence of log lines + exit code into JobStore.
+
+    Also satisfies the conversation-aware parts of the runner protocol so
+    tests can exercise orchestration: `request_id` is patched onto the
+    job during `run` (to mimic the real runner capturing it from
+    stdout), and `discover_session`/`summarize` return canned values.
+    """
 
     store: JobStore
     script: list[LogLine] = field(default_factory=list)
     returncode: int = 0
     delay: float = 0.0
+    captured_request_id: str | None = None
+    discovered_session_id: str | None = None
+    summary_text: str | None = None
+    calls: list[tuple[str, str | None]] = field(default_factory=list)
 
-    async def run(self, job_id: str, cwd: Path, prompt: str) -> None:
+    async def run(
+        self,
+        job_id: str,
+        cwd: Path,
+        prompt: str,
+        *,
+        session_id: str | None = None,
+    ) -> None:
+        self.calls.append(("run", session_id))
         await self.store.set_status(job_id, "running")
+        if session_id is not None:
+            await self.store.set_session_meta(job_id, session_id=session_id)
         for line in self.script:
             if self.delay:
                 await asyncio.sleep(self.delay)
             await self.store.append_log(job_id, line)
+        if self.captured_request_id is not None:
+            await self.store.set_session_meta(
+                job_id, request_id=self.captured_request_id
+            )
         await self.store.set_status(
             job_id,
             "finished" if self.returncode == 0 else "failed",
             returncode=self.returncode,
         )
+
+    async def discover_session(self, request_id: str) -> str | None:
+        self.calls.append(("discover_session", request_id))
+        return self.discovered_session_id
+
+    async def summarize(self, session_id: str, prompt: str = "") -> str | None:
+        self.calls.append(("summarize", session_id))
+        return self.summary_text
 
 
 @pytest.fixture()

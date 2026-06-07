@@ -8,8 +8,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .config import RepoRegistry, Settings
-from .routers import jobs, repos, worktrees
+from .routers import conversations, jobs, repos, worktrees
 from .services.augment_runner import AugmentRunner, SubprocessAugmentRunner
+from .services.conversation_store import ConversationStore
 from .services.git_service import GitService
 from .services.job_store import JobStore
 
@@ -19,6 +20,7 @@ def create_app(
     *,
     git: GitService | None = None,
     store: JobStore | None = None,
+    conversations_store: ConversationStore | None = None,
     runner: AugmentRunner | None = None,
     static_dir: Path | str | None = "static",
 ) -> FastAPI:
@@ -35,6 +37,7 @@ def create_app(
     app.state.registry = RepoRegistry(settings.config_path)
     app.state.git = git or GitService()
     app.state.store = store
+    app.state.conversations = conversations_store or ConversationStore()
     app.state.runner = runner or SubprocessAugmentRunner(
         store=store,
         binary=settings.agent_binary,
@@ -44,6 +47,7 @@ def create_app(
     app.include_router(repos.router)
     app.include_router(worktrees.router)
     app.include_router(jobs.router)
+    app.include_router(conversations.router)
 
     if static_dir is not None:
         path = Path(static_dir)
