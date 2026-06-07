@@ -37,12 +37,12 @@ The application is designed to be accessed primarily via mobile devices, with re
   - **Worktree management**: list, create (new or existing branch), **delete**
   - **Conversation support**: create, list, send turns, real-time updates via SSE
   - Real-time log streaming via SSE
-- **Limitations**:
-  - No job history/list view
-  - No pagination for conversations or jobs
+- **Limitations** (frontend only — backend now supports all of these):
+  - No job history/list view UI (backend `GET /jobs` exists)
+  - No paginated list UI (backend paginates `/jobs` and `/conversations`)
   - No mobile optimization
   - Basic UI with minimal styling
-  - No conversation archiving
+  - No archive UI beyond the simple "Archivieren" button (no archived view)
 
 ### Tech Stack (Current)
 - Vanilla JavaScript (ES6+)
@@ -271,32 +271,42 @@ Create a new conversation.
 ```
 
 ##### `GET /conversations`
-List all conversations with optional filtering.
+Paginated list of conversations with filtering and sorting.
 
 **Query Parameters**:
 - `repo_id` (optional): Filter by repository
+- `worktree` (optional): Filter by worktree name
+- `include_archived` (optional, default `false`): include soft-archived conversations
+- `limit` (optional, default `50`, max `200`)
+- `offset` (optional, default `0`)
+- `sort` (optional, default `-updated_at`): comma-separated list, `-` prefix = desc.
+  Allow-list: `updated_at`, `created_at`. Unknown fields → `400`.
 
-**TODO (Backend)**:
-- [ ] Add pagination support (`limit`, `offset` or `cursor`)
-- [ ] Add more filters (`status`, `worktree`, `updated_since`)
-- [ ] Add sorting options (`created_at`, `updated_at`, `title`)
+**Still open (Backend)**:
+- [ ] Add `updated_since` / status-style filters
 
 **Response**: `200 OK`
 ```json
-[
-  {
-    "id": "conv-abc123...",
-    "repo_id": "my-project",
-    "worktree": "feature_new-feature",
-    "agent_id": null,
-    "title": "Implement authentication",
-    "session_id": "session-xyz...",
-    "summary": "Working on adding JWT authentication to the API",
-    "created_at": "2026-06-07T10:00:00Z",
-    "updated_at": "2026-06-07T10:45:00Z",
-    "turns": ["job-1", "job-2", "job-3"]
-  }
-]
+{
+  "items": [
+    {
+      "id": "conv-abc123...",
+      "repo_id": "my-project",
+      "worktree": "feature_new-feature",
+      "agent_id": null,
+      "title": "Implement authentication",
+      "session_id": "session-xyz...",
+      "summary": "Working on adding JWT authentication to the API",
+      "archived": false,
+      "created_at": "2026-06-07T10:00:00Z",
+      "updated_at": "2026-06-07T10:45:00Z",
+      "turns": ["job-1", "job-2", "job-3"]
+    }
+  ],
+  "total": 42,
+  "limit": 50,
+  "offset": 0
+}
 ```
 
 ##### `GET /conversations/{conversation_id}`
@@ -360,28 +370,33 @@ Add a new turn to an existing conversation.
 
 The `busy` flag indicates whether a turn is currently in progress.
 
-**TODO (Backend)**:
-- [ ] Add `DELETE /conversations/{conversation_id}` endpoint for archiving conversations
-- [ ] Add `archived` field to `ConversationInfo` to mark archived conversations
-- [ ] Add `archived` filter to `GET /conversations` endpoint
+##### `DELETE /conversations/{conversation_id}`
+Soft-archive a conversation. The row is kept so that historical jobs
+can still resolve their `conversation_id`; subsequent `POST .../turns`
+returns `409 Conflict`. Default `GET /conversations` hides archived
+records; pass `?include_archived=true` to see them.
 
-### Missing Endpoints
+**Response**: `204 No Content` on success, `404 Not Found` if unknown.
+
+### Job list
 
 #### `GET /jobs`
-**TODO (Backend)**: Implement paginated job list endpoint.
+Paginated list of jobs with filtering and sorting.
 
-**Proposed Query Parameters**:
-- `limit` (optional, default: 20): Number of jobs per page
-- `offset` (optional, default: 0): Starting position
+**Query Parameters**:
 - `repo_id` (optional): Filter by repository
-- `status` (optional): Filter by status (`queued`, `running`, `finished`, `failed`)
+- `worktree` (optional): Filter by worktree name
+- `status` (optional): `queued` | `running` | `finished` | `failed`. Anything else → `400`.
 - `conversation_id` (optional): Filter by conversation
-- `sort` (optional, default: `created_at_desc`): Sorting order
+- `limit` (optional, default `50`, max `200`)
+- `offset` (optional, default `0`)
+- `sort` (optional, default `-created_at`): comma-separated list, `-` prefix = desc.
+  Allow-list: `created_at`, `finished_at`, `status`. Unknown fields → `400`.
 
-**Proposed Response**: `200 OK`
+**Response**: `200 OK`
 ```json
 {
-  "jobs": [
+  "items": [
     {
       "id": "job-123",
       "repo_id": "my-project",
@@ -395,10 +410,14 @@ The `busy` flag indicates whether a turn is currently in progress.
     }
   ],
   "total": 150,
-  "limit": 20,
+  "limit": 50,
   "offset": 0
 }
 ```
+
+**Validation**:
+- `limit=0` / `limit>200` / `offset<0` → `422` (FastAPI bounds).
+- Unknown `sort` field or `status` value → `400`.
 
 ---
 
@@ -485,9 +504,18 @@ interface ConversationInfo {
   title: string | null;
   session_id: string | null;
   summary: string | null;
+  archived: boolean;
   created_at: string;         // ISO 8601
   updated_at: string;         // ISO 8601
   turns: string[];            // Array of job IDs
+}
+
+// Paginated list wrapper used by GET /jobs and GET /conversations
+interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 // SSE Events

@@ -71,8 +71,8 @@ See **FRONTEND.md** for complete frontend developer guide.
 **Needed for production**:
 - [ ] Mobile-first responsive UI (bottom nav on mobile, sidebar on desktop)
 - [ ] **Worktree delete UI** (swipe-to-delete on mobile, delete button on desktop)
-- [ ] Job list view (requires `GET /jobs`)
-- [ ] Paginated conversation list
+- [ ] Job list view UI (backend `GET /jobs` is in place)
+- [ ] Paginated conversation list UI (backend pagination is in place)
 - [ ] Virtual scrolling for long logs
 - [ ] ANSI escape sequence rendering (use `ansi-to-react`)
 - [ ] Keyboard shortcuts
