@@ -13,23 +13,13 @@ from pocket_dev_guild.schemas import LogLine
 from pocket_dev_guild.services.mongo_job_store import MongoJobStore
 
 
-async def _wait_for_job(store: MongoJobStore, job_id: str, timeout: float = 1.0):
-    """create() spawns the insert via asyncio.create_task; wait for it."""
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
-        info = await store.get(job_id)
-        if info is not None:
-            return info
-        await asyncio.sleep(0.01)
-    raise AssertionError(f"job {job_id} never persisted")
-
-
 @pytest.mark.asyncio
 async def test_create_and_get(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
-    info = store.create(repo_id="demo", worktree="feature-a", prompt="hi")
+    info = await store.create(repo_id="demo", worktree="feature-a", prompt="hi")
 
-    persisted = await _wait_for_job(store, info.id)
+    persisted = await store.get(info.id)
+    assert persisted is not None
     assert persisted.repo_id == "demo"
     assert persisted.worktree == "feature-a"
     assert persisted.prompt == "hi"
@@ -41,10 +31,11 @@ async def test_create_and_get(mongo_db) -> None:
 @pytest.mark.asyncio
 async def test_create_with_conversation_id(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
-    info = store.create(
+    info = await store.create(
         repo_id="demo", worktree=None, prompt="x", conversation_id="conv-1"
     )
-    persisted = await _wait_for_job(store, info.id)
+    persisted = await store.get(info.id)
+    assert persisted is not None
     assert persisted.conversation_id == "conv-1"
     assert persisted.worktree is None
 
@@ -58,8 +49,7 @@ async def test_get_missing_returns_none(mongo_db) -> None:
 @pytest.mark.asyncio
 async def test_snapshot_includes_log(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
-    info = store.create(repo_id="demo", worktree="wt", prompt="p")
-    await _wait_for_job(store, info.id)
+    info = await store.create(repo_id="demo", worktree="wt", prompt="p")
 
     await store.append_log(info.id, LogLine(stream="stdout", line="hello\n"))
     await store.append_log(info.id, LogLine(stream="stderr", line="warn\n"))
@@ -80,8 +70,7 @@ async def test_snapshot_missing_returns_none(mongo_db) -> None:
 @pytest.mark.asyncio
 async def test_log_slice_starts_at_offset(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
-    info = store.create(repo_id="demo", worktree="wt", prompt="p")
-    await _wait_for_job(store, info.id)
+    info = await store.create(repo_id="demo", worktree="wt", prompt="p")
     for i in range(4):
         await store.append_log(info.id, LogLine(stream="stdout", line=f"{i}\n"))
 
@@ -92,8 +81,7 @@ async def test_log_slice_starts_at_offset(mongo_db) -> None:
 @pytest.mark.asyncio
 async def test_set_status_writes_finished_at(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
-    info = store.create(repo_id="demo", worktree="wt", prompt="p")
-    await _wait_for_job(store, info.id)
+    info = await store.create(repo_id="demo", worktree="wt", prompt="p")
 
     await store.set_status(info.id, "running")
     running = await store.get(info.id)
@@ -105,13 +93,14 @@ async def test_set_status_writes_finished_at(mongo_db) -> None:
     assert finished.status == "finished"
     assert finished.returncode == 0
     assert finished.finished_at is not None
+    # finished_at must be tz-aware (BSON roundtrip normalized to UTC)
+    assert finished.finished_at.tzinfo is not None
 
 
 @pytest.mark.asyncio
 async def test_set_session_meta_only_overwrites_non_none(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
-    info = store.create(repo_id="demo", worktree="wt", prompt="p")
-    await _wait_for_job(store, info.id)
+    info = await store.create(repo_id="demo", worktree="wt", prompt="p")
 
     await store.set_session_meta(info.id, request_id="req-1", session_id="s-1")
     after = await store.get(info.id)
@@ -134,8 +123,7 @@ async def test_set_session_meta_only_overwrites_non_none(mongo_db) -> None:
 @pytest.mark.asyncio
 async def test_wait_for_update_unblocks_on_append_log(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
-    info = store.create(repo_id="demo", worktree="wt", prompt="p")
-    await _wait_for_job(store, info.id)
+    info = await store.create(repo_id="demo", worktree="wt", prompt="p")
 
     async def producer():
         await asyncio.sleep(0.01)

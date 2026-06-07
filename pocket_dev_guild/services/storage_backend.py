@@ -7,9 +7,26 @@ for in-memory and MongoDB storage.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
+
+
+def _attach_utc(value: Any) -> Any:
+    """Tag naive datetimes (as returned by motor/BSON) with UTC.
+
+    Motor decodes BSON dates as naive `datetime` objects in UTC. We
+    normalize them here so callers always see tz-aware datetimes,
+    matching what `datetime.now(timezone.utc)` produces on writes.
+    """
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    if isinstance(value, dict):
+        return {k: _attach_utc(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_attach_utc(v) for v in value]
+    return value
 
 
 class StorageBackend(Protocol):
@@ -140,7 +157,7 @@ class MongoBackend:
     async def get(self, collection: str, id: str) -> dict[str, Any] | None:
         try:
             doc = await self._db[collection].find_one({"id": id}, {"_id": 0})
-            return doc
+            return _attach_utc(doc) if doc else doc
         except Exception as e:
             logger.error(f"Failed to get document {id} from {collection}: {e}")
             return None
@@ -162,7 +179,8 @@ class MongoBackend:
             if limit is not None:
                 cursor = cursor.limit(limit)
 
-            return await cursor.to_list(None)
+            docs = await cursor.to_list(None)
+            return [_attach_utc(d) for d in docs]
         except Exception as e:
             logger.error(f"Failed to find documents in {collection}: {e}")
             return []

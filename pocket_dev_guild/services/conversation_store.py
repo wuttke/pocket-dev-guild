@@ -65,7 +65,10 @@ class ConversationStore:
             updated_at=now,
             turns=[],
         )
-        await self._backend.insert("conversations", info.model_dump(mode="json"))
+        # NOTE: use model_dump() (not mode="json") so datetimes stay as
+        # datetime objects. MongoBackend then stores them as BSON dates,
+        # matching what update()/append_turn()/patch() write.
+        await self._backend.insert("conversations", info.model_dump())
         return info
 
     async def get(self, conv_id: str) -> ConversationInfo | None:

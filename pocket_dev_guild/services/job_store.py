@@ -23,7 +23,7 @@ class JobStore:
         self._jobs: dict[str, _JobRecord] = {}
         self._notifications = notifications or NotificationHub()
 
-    def create(
+    async def create(
         self,
         repo_id: str,
         worktree: str | None,

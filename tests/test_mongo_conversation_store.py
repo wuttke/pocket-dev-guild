@@ -70,8 +70,6 @@ async def test_append_turn_updates_list_and_timestamp(mongo_db) -> None:
     info = await store.create(
         repo_id="demo", worktree=None, agent_id=None, title=None
     )
-    # Read the original via the same path the assertion uses, so both
-    # timestamps have identical tzinfo shape (Mongo returns naive UTC).
     pre = await store.get(info.id)
     await asyncio.sleep(0.01)
 
@@ -80,13 +78,10 @@ async def test_append_turn_updates_list_and_timestamp(mongo_db) -> None:
 
     got = await store.get(info.id)
     assert got.turns == ["job-1", "job-2"]
-    # NOTE: create() serializes datetimes as ISO strings (-> tz-aware on
-    # read), while update() writes raw datetime (-> naive on read). Compare
-    # naive-vs-naive until that's unified at the storage layer.
-    def _naive(dt):
-        return dt.replace(tzinfo=None) if dt.tzinfo else dt
-
-    assert _naive(got.updated_at) > _naive(pre.updated_at)
+    assert got.updated_at > pre.updated_at
+    # Both timestamps must be tz-aware after the BSON-roundtrip normalization.
+    assert pre.updated_at.tzinfo is not None
+    assert got.updated_at.tzinfo is not None
 
 
 @pytest.mark.asyncio

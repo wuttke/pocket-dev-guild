@@ -63,7 +63,7 @@ async def start_job(
                 409, "Conversation already has a turn in flight"
             )
 
-    info = store.create(
+    info = await store.create(
         repo_id, worktree, prompt, conversation_id=conversation_id
     )
 

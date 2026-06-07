@@ -6,7 +6,6 @@ the in-memory JobStore.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -15,6 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..schemas import JobInfo, JobLog, JobStatus, LogLine
 from .notification_hub import NotificationHub
+from .storage_backend import _attach_utc
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class MongoJobStore:
         except Exception as e:
             logger.error(f"Failed to ensure indexes for jobs/logs: {e}")
 
-    def create(
+    async def create(
         self,
         repo_id: str,
         worktree: str | None,
@@ -60,14 +60,9 @@ class MongoJobStore:
             created_at=datetime.now(timezone.utc),
             conversation_id=conversation_id,
         )
-        # Store in MongoDB with error handling
-        async def _insert_with_logging():
-            try:
-                await self._jobs.insert_one(info.model_dump(mode="json"))
-            except Exception as e:
-                logger.error(f"Failed to persist job {job_id}: {e}")
-
-        asyncio.create_task(_insert_with_logging())
+        # model_dump() keeps datetimes native so motor stores them as BSON
+        # dates, consistent with set_status()/set_session_meta().
+        await self._jobs.insert_one(info.model_dump())
         return info
 
     async def get(self, job_id: str) -> JobInfo | None:
@@ -75,7 +70,7 @@ class MongoJobStore:
             doc = await self._jobs.find_one({"id": job_id}, {"_id": 0})
             if not doc:
                 return None
-            return JobInfo(**doc)
+            return JobInfo(**_attach_utc(doc))
         except Exception as e:
             logger.error(f"Failed to get job {job_id}: {e}")
             return None
@@ -91,7 +86,7 @@ class MongoJobStore:
             ).sort("seq", 1).to_list(None)
             log = [LogLine(**doc) for doc in log_docs]
 
-            return JobLog(**job_doc, log=log)
+            return JobLog(**_attach_utc(job_doc), log=log)
         except Exception as e:
             logger.error(f"Failed to get snapshot for job {job_id}: {e}")
             return None
