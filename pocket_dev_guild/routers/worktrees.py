@@ -43,12 +43,19 @@ async def create_worktree(
     registry: RepoRegistry = Depends(get_registry),
     git: GitService = Depends(get_git),
 ) -> WorktreeCreated:
-    target = registry.worktree_path(repo, body.name)
+    # Always create a fresh branch off `origin`'s default tip; the
+    # worktree directory mirrors the branch with `/` -> `_` so it
+    # satisfies `IDENT_PATTERN` for use in URL segments.
+    name = body.branch.replace("/", "_")
+    target = registry.worktree_path(repo, name)
     try:
-        await git.add_worktree(Path(repo.path), target, body.base_branch)
+        start_point = await git.default_remote_branch(Path(repo.path))
+        await git.add_worktree(
+            Path(repo.path), target, branch=body.branch, start_point=start_point
+        )
     except GitError as exc:
         raise HTTPException(400, str(exc))
-    return WorktreeCreated(name=body.name, path=str(target))
+    return WorktreeCreated(name=name, path=str(target))
 
 
 @router.delete("/{name}", response_model=WorktreeRemoved, summary="Remove a worktree")

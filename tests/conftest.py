@@ -24,20 +24,29 @@ class FakeGit(GitService):
     """In-memory git stand-in. Tracks calls and serves canned data."""
 
     worktrees: dict[str, list[WorktreeInfo]] = field(default_factory=dict)
-    added: list[tuple[str, str, str | None]] = field(default_factory=list)
+    added: list[tuple[str, str, str, str]] = field(default_factory=list)
     removed: list[tuple[str, str]] = field(default_factory=list)
+    default_branch: str = "origin/main"
 
     async def list_worktrees(self, repo_path: Path) -> list[WorktreeInfo]:
         return list(self.worktrees.get(str(repo_path), []))
 
+    async def default_remote_branch(self, repo_path: Path) -> str:
+        return self.default_branch
+
     async def add_worktree(
-        self, repo_path: Path, target: Path, base_branch: str | None = None
+        self,
+        repo_path: Path,
+        target: Path,
+        *,
+        branch: str,
+        start_point: str,
     ) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.mkdir(exist_ok=True)
-        self.added.append((str(repo_path), str(target), base_branch))
+        self.added.append((str(repo_path), str(target), branch, start_point))
         self.worktrees.setdefault(str(repo_path), []).append(
-            WorktreeInfo(path=str(target), branch=base_branch)
+            WorktreeInfo(path=str(target), branch=f"refs/heads/{branch}")
         )
 
     async def remove_worktree(self, repo_path: Path, target: Path) -> None:

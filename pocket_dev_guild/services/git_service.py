@@ -44,14 +44,64 @@ class GitService:
             raise GitError(err.strip() or "git worktree list failed", code)
         return [_parse_worktree(block) for block in _split_porcelain(out)]
 
+    async def _resolve_remote(self, repo_path: Path) -> str:
+        """Pick the remote to branch off.
+
+        Prefers `origin` if present (the overwhelmingly common case);
+        otherwise the single configured remote; otherwise raises.
+        """
+        code, out, err = await self._run(["remote"], repo_path)
+        if code != 0:
+            raise GitError(err.strip() or "git remote failed", code)
+        remotes = [r for r in out.split() if r]
+        if not remotes:
+            raise GitError("repo has no remotes", 1)
+        if "origin" in remotes:
+            return "origin"
+        if len(remotes) == 1:
+            return remotes[0]
+        raise GitError(
+            f"ambiguous: multiple remotes {remotes!r}, none called 'origin'",
+            1,
+        )
+
+    async def default_remote_branch(self, repo_path: Path) -> str:
+        """Return the short ref of the default branch on the picked remote.
+
+        Resolves `refs/remotes/<remote>/HEAD` to e.g. `origin/main` or
+        `upstream/master`. Raises `GitError` if the symbolic ref is not
+        set (never fetched, remote HEAD detached, etc).
+        """
+        remote = await self._resolve_remote(repo_path)
+        code, out, err = await self._run(
+            ["symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD"],
+            repo_path,
+        )
+        if code != 0:
+            raise GitError(
+                err.strip() or f"could not resolve {remote}/HEAD", code
+            )
+        return out.strip()
+
     async def add_worktree(
-        self, repo_path: Path, target: Path, base_branch: str | None = None
+        self,
+        repo_path: Path,
+        target: Path,
+        *,
+        branch: str,
+        start_point: str,
     ) -> None:
+        """Create `target` as a worktree with a fresh `branch` off `start_point`.
+
+        Always uses `-b`, so callers must hand in a branch name that
+        does not yet exist; otherwise git fails and we surface that as
+        a `GitError`.
+        """
         target.parent.mkdir(parents=True, exist_ok=True)
-        args = ["worktree", "add", str(target)]
-        if base_branch:
-            args.append(base_branch)
-        code, _, err = await self._run(args, repo_path)
+        code, _, err = await self._run(
+            ["worktree", "add", "-b", branch, str(target), start_point],
+            repo_path,
+        )
         if code != 0:
             raise GitError(err.strip() or "git worktree add failed", code)
 

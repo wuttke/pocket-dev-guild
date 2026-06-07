@@ -45,9 +45,16 @@ class WorktreeInfo(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# Branch names follow a `kind/slug[/slug...]` convention. The leading
+# segment is purely letters (e.g. `feature`, `bugfix`), subsequent
+# segments are kebab-case slugs. Worktree directory names are derived
+# from this by replacing `/` with `_`, which yields a string that
+# satisfies `IDENT_PATTERN` without further validation.
+BRANCH_PATTERN = r"^[a-z]+(/[a-z0-9-]+)+$"
+
+
 class WorktreeCreate(BaseModel):
-    name: str = Field(pattern=IDENT_PATTERN)
-    base_branch: str | None = None
+    branch: str = Field(pattern=BRANCH_PATTERN)
 
 
 class WorktreeCreated(BaseModel):
