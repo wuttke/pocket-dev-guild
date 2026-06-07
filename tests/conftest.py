@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import AsyncIterator, Iterator
 
 import pytest
+import pytest_asyncio
 import yaml
 from fastapi.testclient import TestClient
 
@@ -141,3 +144,38 @@ def client(app_factory) -> Iterator[TestClient]:
     app = app_factory()
     with TestClient(app) as c:
         yield c
+
+
+# -- MongoDB fixtures (skip if mongo not reachable) -------------------------
+
+MONGO_TEST_URL = os.environ.get(
+    "POCKET_DEV_GUILD_MONGO_TEST_URL", "mongodb://localhost:27017"
+)
+
+
+@pytest_asyncio.fixture()
+async def mongo_db():
+    """Per-test motor database against a real local MongoDB.
+
+    Skips the test if no MongoDB is reachable. Uses a unique db name per
+    test and drops it on teardown.
+    """
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+    except ImportError:
+        pytest.skip("motor not installed")
+
+    client = AsyncIOMotorClient(MONGO_TEST_URL, serverSelectionTimeoutMS=500)
+    try:
+        await client.admin.command("ping")
+    except Exception as exc:
+        client.close()
+        pytest.skip(f"MongoDB at {MONGO_TEST_URL} not reachable: {exc}")
+
+    db_name = f"pocket_dev_guild_test_{uuid.uuid4().hex[:12]}"
+    db = client[db_name]
+    try:
+        yield db
+    finally:
+        await client.drop_database(db_name)
+        client.close()
