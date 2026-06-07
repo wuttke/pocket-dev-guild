@@ -5,7 +5,6 @@
 
 # Optional: MongoDB connection URL for job and conversation persistence.
 # If not specified, uses in-memory stores (data lost on restart).
-# Default: mongodb://localhost:27017/pocket_dev_guild
 #
 # Examples:
 #   Local without auth: mongodb://localhost:27017/pocket_dev_guild
