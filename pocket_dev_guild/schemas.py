@@ -55,7 +55,7 @@ class WorktreeRemoved(BaseModel):
 
 class JobCreate(BaseModel):
     repo_id: str
-    worktree: str
+    worktree: str | None = None
     prompt: str
 
 
@@ -66,7 +66,7 @@ class JobCreated(BaseModel):
 class JobInfo(BaseModel):
     id: str
     repo_id: str
-    worktree: str
+    worktree: str | None = None
     prompt: str
     status: JobStatus
     returncode: int | None = None

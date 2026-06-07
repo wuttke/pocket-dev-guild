@@ -63,3 +63,16 @@ def test_job_unknown_worktree(client: TestClient) -> None:
         json={"repo_id": "demo", "worktree": "missing", "prompt": "x"},
     )
     assert response.status_code == 404
+
+
+def test_job_primary_repo(app_factory, tmp_config) -> None:
+    script = [LogLine(stream="stdout", line="ok\n")]
+    with _make_client(app_factory, tmp_config, script) as client:
+        # worktree omitted → runs in the primary repo checkout
+        create = client.post(
+            "/jobs", json={"repo_id": "demo", "prompt": "do it"}
+        )
+        assert create.status_code == 200, create.text
+        job_id = create.json()["job_id"]
+        info = client.get(f"/jobs/{job_id}").json()
+        assert info["worktree"] is None

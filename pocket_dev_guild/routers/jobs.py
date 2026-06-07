@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -27,9 +28,13 @@ async def create_job(
     repo = registry.get(body.repo_id)
     if repo is None:
         raise HTTPException(404, f"Repo '{body.repo_id}' not found")
-    target = registry.worktree_path(repo, body.worktree)
+    if body.worktree is None:
+        target = Path(repo.path)
+    else:
+        target = registry.worktree_path(repo, body.worktree)
     if not target.exists():
-        raise HTTPException(404, f"Worktree '{body.worktree}' not found at {target}")
+        label = body.worktree if body.worktree is not None else "<primary>"
+        raise HTTPException(404, f"Worktree '{label}' not found at {target}")
 
     info = store.create(body.repo_id, body.worktree, body.prompt)
     asyncio.create_task(runner.run(info.id, target, body.prompt))

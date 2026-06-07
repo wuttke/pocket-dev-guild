@@ -22,7 +22,7 @@ class JobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, _JobRecord] = {}
 
-    def create(self, repo_id: str, worktree: str, prompt: str) -> JobInfo:
+    def create(self, repo_id: str, worktree: str | None, prompt: str) -> JobInfo:
         job_id = uuid.uuid4().hex
         info = JobInfo(
             id=job_id,

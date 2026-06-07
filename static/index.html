@@ -60,11 +60,14 @@ async function loadWorktrees() {
   const repoId = $("repo").value;
   if (!repoId) return;
   const r = await fetch(`/repos/${repoId}/worktrees`).then(r => r.json());
+  // Primary checkout uses value="" -> sent as worktree: null to the API.
   $("worktree").innerHTML = r
-    .filter(w => w.path)
     .map(w => {
-      const name = w.path.split("/").pop();
-      return `<option value="${name}">${name} (${w.branch || w.head || ""})</option>`;
+      const ref = w.branch || w.head || "";
+      if (w.is_primary) {
+        return `<option value="">&lt;primary&gt; (${ref})</option>`;
+      }
+      return `<option value="${w.name}">${w.name} (${ref})</option>`;
     })
     .join("");
 }
@@ -94,7 +97,7 @@ async function runAugment() {
   const res = await fetch(`/jobs`, {
     method: "POST",
     headers: {"content-type": "application/json"},
-    body: JSON.stringify({repo_id: repoId, worktree: name, prompt}),
+    body: JSON.stringify({repo_id: repoId, worktree: name || null, prompt}),
   });
   if (!res.ok) { alert(await res.text()); return; }
   const {job_id} = await res.json();
