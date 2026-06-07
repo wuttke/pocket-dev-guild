@@ -165,3 +165,52 @@ async def test_ensure_indexes_idempotent(mongo_db) -> None:
     store = MongoJobStore(mongo_db)
     await store._ensure_indexes()
     await store._ensure_indexes()  # second call must not raise
+
+
+@pytest.mark.asyncio
+async def test_list_and_count_with_filters(mongo_db) -> None:
+    store = MongoJobStore(mongo_db)
+    a1 = await store.create(repo_id="demo", worktree="wt-a", prompt="p")
+    await asyncio.sleep(0.01)
+    a2 = await store.create(repo_id="demo", worktree="wt-a", prompt="p")
+    await asyncio.sleep(0.01)
+    b1 = await store.create(repo_id="demo", worktree="wt-b", prompt="p")
+    await store.set_status(a1.id, "running")
+    await store.set_status(a2.id, "finished", returncode=0)
+
+    # No filter, default sort (-created_at) → newest first.
+    listed = await store.list()
+    assert [j.id for j in listed] == [b1.id, a2.id, a1.id]
+    assert await store.count() == 3
+
+    # Filter by worktree.
+    wt_a = await store.list(worktree="wt-a")
+    assert {j.id for j in wt_a} == {a1.id, a2.id}
+    assert await store.count(worktree="wt-a") == 2
+
+    # Filter by status.
+    fin = await store.list(status="finished")
+    assert [j.id for j in fin] == [a2.id]
+    assert await store.count(status="finished") == 1
+
+    # Sort ascending.
+    asc = await store.list(sort=[("created_at", 1)])
+    assert [j.id for j in asc] == [a1.id, a2.id, b1.id]
+
+    # Pagination: skip 1, take 1 under default sort.
+    page = await store.list(limit=1, offset=1)
+    assert [j.id for j in page] == [a2.id]
+
+
+@pytest.mark.asyncio
+async def test_list_filter_by_conversation_id(mongo_db) -> None:
+    store = MongoJobStore(mongo_db)
+    a = await store.create(
+        repo_id="demo", worktree=None, prompt="p", conversation_id="conv-1"
+    )
+    await store.create(
+        repo_id="demo", worktree=None, prompt="p", conversation_id="conv-2"
+    )
+    listed = await store.list(conversation_id="conv-1")
+    assert [j.id for j in listed] == [a.id]
+    assert await store.count(conversation_id="conv-1") == 1

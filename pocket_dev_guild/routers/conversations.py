@@ -14,13 +14,17 @@ from ..schemas import (
     IDENT_PATTERN,
     ConversationCreate,
     ConversationInfo,
+    ConversationListResponse,
     ConversationTurnCreate,
     JobCreated,
 )
 from ..services.augment_runner import AugmentRunner
 from ..services.conversation_store import ConversationStore
 from ..services.job_store import JobStore
+from ._pagination import DEFAULT_LIMIT, MAX_LIMIT, parse_sort
 from .jobs import start_job
+
+_CONVERSATION_SORT_FIELDS = {"updated_at", "created_at"}
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -49,15 +53,39 @@ async def create_conversation(
 
 
 @router.get(
-    "", response_model=list[ConversationInfo], summary="List conversations"
+    "",
+    response_model=ConversationListResponse,
+    summary="List conversations with filters, sort and pagination",
 )
 async def list_conversations(
     repo_id: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
+    worktree: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
     include_archived: bool = False,
+    sort: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    offset: Annotated[int, Query(ge=0)] = 0,
     conversations: ConversationStore = Depends(get_conversations),
-) -> list[ConversationInfo]:
-    return await conversations.list(
-        repo_id=repo_id, include_archived=include_archived
+) -> ConversationListResponse:
+    sort_spec = parse_sort(
+        sort,
+        allowed=_CONVERSATION_SORT_FIELDS,
+        default=[("updated_at", -1)],
+    )
+    items = await conversations.list(
+        repo_id=repo_id,
+        worktree=worktree,
+        include_archived=include_archived,
+        sort=sort_spec,
+        limit=limit,
+        offset=offset,
+    )
+    total = await conversations.count(
+        repo_id=repo_id,
+        worktree=worktree,
+        include_archived=include_archived,
+    )
+    return ConversationListResponse(
+        items=items, total=total, limit=limit, offset=offset
     )
 
 

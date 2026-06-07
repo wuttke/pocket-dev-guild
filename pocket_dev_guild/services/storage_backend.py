@@ -29,9 +29,44 @@ def _attach_utc(value: Any) -> Any:
     return value
 
 
+def _match_filter(doc: dict[str, Any], filter: dict[str, Any]) -> bool:
+    """Tiny Mongo-style matcher for InMemoryBackend.
+
+    Supported per-field specs:
+      * scalar value -> exact equality
+      * `{"$ne": v}` -> not equal (also matches missing fields)
+      * `{"$in": [...]}` -> membership
+      * `{"$gte": v}` / `{"$lte": v}` -> range (None compares as < anything)
+    Mongo accepts the same dialect verbatim, so callers can build one
+    filter dict and hand it to either backend.
+    """
+    for field, spec in filter.items():
+        value = doc.get(field)
+        if isinstance(spec, dict):
+            for op, operand in spec.items():
+                if op == "$ne":
+                    if value == operand:
+                        return False
+                elif op == "$in":
+                    if value not in operand:
+                        return False
+                elif op == "$gte":
+                    if value is None or value < operand:
+                        return False
+                elif op == "$lte":
+                    if value is None or value > operand:
+                        return False
+                else:
+                    raise ValueError(f"Unsupported filter operator: {op}")
+        else:
+            if value != spec:
+                return False
+    return True
+
+
 class StorageBackend(Protocol):
     """Protocol for storage backends.
-    
+
     Provides basic CRUD operations on collections of documents.
     Each document is a dict with an 'id' field as primary key.
     """
@@ -46,8 +81,17 @@ class StorageBackend(Protocol):
         filter: dict[str, Any] | None = None,
         sort: list[tuple[str, int]] | None = None,
         limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Find documents matching filter, optionally sorted and limited."""
+        """Find documents matching filter, optionally sorted/paginated."""
+        ...
+
+    async def count(
+        self,
+        collection: str,
+        filter: dict[str, Any] | None = None,
+    ) -> int:
+        """Count documents matching filter."""
         ...
 
     async def insert(self, collection: str, document: dict[str, Any]) -> None:
@@ -83,26 +127,40 @@ class InMemoryBackend:
         filter: dict[str, Any] | None = None,
         sort: list[tuple[str, int]] | None = None,
         limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         docs = list(self._data.get(collection, {}).values())
 
-        # Simple filter: exact match on specified fields
         if filter:
-            docs = [
-                doc
-                for doc in docs
-                if all(doc.get(k) == v for k, v in filter.items())
-            ]
+            docs = [doc for doc in docs if _match_filter(doc, filter)]
 
         # Sort: list of (field, direction) where direction is 1 (asc) or -1 (desc)
         if sort:
             for field, direction in reversed(sort):
-                docs.sort(key=lambda d: d.get(field, ""), reverse=(direction == -1))
+                # `None` sorts before everything else regardless of direction;
+                # the secondary key (`field` itself missing → "") keeps the
+                # ordering deterministic across heterogenous docs.
+                docs.sort(
+                    key=lambda d: (d.get(field) is None, d.get(field, "")),
+                    reverse=(direction == -1),
+                )
 
+        if offset:
+            docs = docs[offset:]
         if limit is not None:
             docs = docs[:limit]
 
         return docs
+
+    async def count(
+        self,
+        collection: str,
+        filter: dict[str, Any] | None = None,
+    ) -> int:
+        docs = self._data.get(collection, {}).values()
+        if not filter:
+            return len(docs)
+        return sum(1 for doc in docs if _match_filter(doc, filter))
 
     async def insert(self, collection: str, document: dict[str, Any]) -> None:
         if collection not in self._data:
@@ -168,6 +226,7 @@ class MongoBackend:
         filter: dict[str, Any] | None = None,
         sort: list[tuple[str, int]] | None = None,
         limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         try:
             query = filter or {}
@@ -176,6 +235,8 @@ class MongoBackend:
             if sort:
                 cursor = cursor.sort(sort)
 
+            if offset:
+                cursor = cursor.skip(offset)
             if limit is not None:
                 cursor = cursor.limit(limit)
 
@@ -184,6 +245,17 @@ class MongoBackend:
         except Exception as e:
             logger.error(f"Failed to find documents in {collection}: {e}")
             return []
+
+    async def count(
+        self,
+        collection: str,
+        filter: dict[str, Any] | None = None,
+    ) -> int:
+        try:
+            return await self._db[collection].count_documents(filter or {})
+        except Exception as e:
+            logger.error(f"Failed to count documents in {collection}: {e}")
+            return 0
 
     async def insert(self, collection: str, document: dict[str, Any]) -> None:
         try:

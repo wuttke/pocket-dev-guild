@@ -151,6 +151,58 @@ async def test_archive_hides_from_list_and_keeps_get(mongo_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_pagination_filter_sort(mongo_db) -> None:
+    store = ConversationStore(backend=MongoBackend(mongo_db))
+    convs = []
+    for i in range(4):
+        wt = "wt-a" if i % 2 == 0 else "wt-b"
+        c = await store.create(
+            repo_id="demo", worktree=wt, agent_id=None, title=f"c{i}"
+        )
+        convs.append(c)
+        await asyncio.sleep(0.01)
+
+    # Default sort (-updated_at) → newest first.
+    listed = await store.list(repo_id="demo")
+    assert [c.id for c in listed] == [c.id for c in reversed(convs)]
+    assert await store.count(repo_id="demo") == 4
+
+    # Filter by worktree.
+    wt_a = await store.list(repo_id="demo", worktree="wt-a")
+    assert {c.id for c in wt_a} == {convs[0].id, convs[2].id}
+    assert await store.count(repo_id="demo", worktree="wt-a") == 2
+
+    # Ascending sort by created_at.
+    asc = await store.list(repo_id="demo", sort=[("created_at", 1)])
+    assert [c.id for c in asc] == [c.id for c in convs]
+
+    # Pagination: limit=2, offset=1 under default sort.
+    page = await store.list(repo_id="demo", limit=2, offset=1)
+    expected = list(reversed(convs))[1:3]
+    assert [c.id for c in page] == [c.id for c in expected]
+
+
+@pytest.mark.asyncio
+async def test_count_respects_archived_filter(mongo_db) -> None:
+    store = ConversationStore(backend=MongoBackend(mongo_db))
+    a = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="a"
+    )
+    b = await store.create(
+        repo_id="demo", worktree=None, agent_id=None, title="b"
+    )
+    await store.archive(b.id)
+
+    # archived hidden from default count
+    assert await store.count(repo_id="demo") == 1
+    assert await store.count(repo_id="demo", include_archived=True) == 2
+
+    # Pagination respects the filter — no double-count of archived.
+    page = await store.list(repo_id="demo", limit=10)
+    assert [c.id for c in page] == [a.id]
+
+
+@pytest.mark.asyncio
 async def test_state_returns_info_and_busy_flag(mongo_db) -> None:
     store = ConversationStore(backend=MongoBackend(mongo_db))
     info = await store.create(

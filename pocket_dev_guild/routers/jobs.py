@@ -6,16 +6,30 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated, get_args
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import RepoRegistry
 from ..deps import get_conversations, get_registry, get_runner, get_store
-from ..schemas import JobCreate, JobCreated, JobInfo, JobLog
+from ..schemas import (
+    IDENT_PATTERN,
+    JobCreate,
+    JobCreated,
+    JobInfo,
+    JobListResponse,
+    JobLog,
+    JobStatus,
+)
 from ..services.augment_runner import AugmentRunner
 from ..services.conversation_orchestrator import run_conversation_turn
 from ..services.conversation_store import ConversationStore
 from ..services.job_store import JobStore
+from ._pagination import DEFAULT_LIMIT, MAX_LIMIT, parse_sort
+
+_JOB_SORT_FIELDS = {"created_at", "finished_at", "status"}
+_JOB_STATUS_VALUES = set(get_args(JobStatus))
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -103,6 +117,47 @@ async def create_job(
         runner=runner,
         conversations=conversations,
     )
+
+
+@router.get(
+    "",
+    response_model=JobListResponse,
+    summary="List jobs with filters, sort and pagination",
+)
+async def list_jobs(
+    repo_id: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
+    worktree: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
+    status: str | None = None,
+    conversation_id: Annotated[str | None, Query(min_length=1)] = None,
+    sort: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    store: JobStore = Depends(get_store),
+) -> JobListResponse:
+    if status is not None and status not in _JOB_STATUS_VALUES:
+        raise HTTPException(
+            400,
+            f"Invalid status '{status}'. Allowed: {sorted(_JOB_STATUS_VALUES)}",
+        )
+    sort_spec = parse_sort(
+        sort, allowed=_JOB_SORT_FIELDS, default=[("created_at", -1)]
+    )
+    items = await store.list(
+        repo_id=repo_id,
+        worktree=worktree,
+        status=status,
+        conversation_id=conversation_id,
+        sort=sort_spec,
+        limit=limit,
+        offset=offset,
+    )
+    total = await store.count(
+        repo_id=repo_id,
+        worktree=worktree,
+        status=status,
+        conversation_id=conversation_id,
+    )
+    return JobListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{job_id}", response_model=JobInfo, summary="Job metadata")

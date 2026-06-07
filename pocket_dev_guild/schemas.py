@@ -121,6 +121,20 @@ class ConversationTurnCreate(BaseModel):
     prompt: str
 
 
+class JobListResponse(BaseModel):
+    """Paginated job listing.
+
+    `total` is the count matching the filter, independent of `limit`/
+    `offset` — clients use it to render page indicators without an extra
+    round-trip.
+    """
+
+    items: list[JobInfo]
+    total: int
+    limit: int
+    offset: int
+
+
 class ConversationInfo(BaseModel):
     id: str
     repo_id: str
@@ -137,3 +151,12 @@ class ConversationInfo(BaseModel):
     # new turns. The record is preserved (no physical delete) so existing
     # job rows still resolve their conversation_id.
     archived: bool = False
+
+
+class ConversationListResponse(BaseModel):
+    """Paginated conversation listing. See `JobListResponse` for the contract."""
+
+    items: list[ConversationInfo]
+    total: int
+    limit: int
+    offset: int

@@ -116,6 +116,36 @@ async def test_ensure_indexes_is_idempotent(mongo_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_find_with_offset_and_count(mongo_db) -> None:
+    backend = MongoBackend(mongo_db)
+    for i in range(5):
+        await backend.insert("things", {"id": f"x{i}", "n": i})
+
+    assert await backend.count("things") == 5
+    assert await backend.count("things", filter={"n": {"$gte": 3}}) == 2
+
+    page = await backend.find(
+        "things", sort=[("n", 1)], limit=2, offset=2
+    )
+    assert [r["id"] for r in page] == ["x2", "x3"]
+
+
+@pytest.mark.asyncio
+async def test_find_filter_ne_excludes_field_or_missing(mongo_db) -> None:
+    """`$ne: True` must include docs where the field is missing — that's
+    how `ConversationStore` hides only explicit archives without
+    backfilling legacy records."""
+    backend = MongoBackend(mongo_db)
+    await backend.insert("things", {"id": "a", "archived": True})
+    await backend.insert("things", {"id": "b", "archived": False})
+    await backend.insert("things", {"id": "c"})  # archived field missing
+
+    rows = await backend.find("things", filter={"archived": {"$ne": True}})
+    assert {r["id"] for r in rows} == {"b", "c"}
+    assert await backend.count("things", filter={"archived": {"$ne": True}}) == 2
+
+
+@pytest.mark.asyncio
 async def test_ensure_indexes_unique_enforced(mongo_db) -> None:
     from pymongo.errors import DuplicateKeyError
 

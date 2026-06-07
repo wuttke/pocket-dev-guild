@@ -77,30 +77,63 @@ class ConversationStore:
             return None
         return ConversationInfo(**doc)
 
+    def _build_filter(
+        self,
+        *,
+        repo_id: str | None,
+        worktree: str | None,
+        include_archived: bool,
+    ) -> dict[str, object]:
+        f: dict[str, object] = {}
+        if repo_id is not None:
+            f["repo_id"] = repo_id
+        if worktree is not None:
+            f["worktree"] = worktree
+        if not include_archived:
+            # `$ne: True` matches docs missing the field as well — covers
+            # pre-archive records that never had `archived` written.
+            f["archived"] = {"$ne": True}
+        return f
+
     async def list(
         self,
         repo_id: str | None = None,
         *,
+        worktree: str | None = None,
         include_archived: bool = False,
+        sort: list[tuple[str, int]] | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[ConversationInfo]:
-        filter_dict: dict[str, object] = {}
-        if repo_id is not None:
-            filter_dict["repo_id"] = repo_id
-        if not include_archived:
-            # Older records (pre-archive) don't carry the field at all,
-            # so exclude only explicit True. Backends handle missing
-            # fields equally for {field: False} via exact match — to
-            # stay backend-agnostic, filter in Python after fetching.
-            pass
+        filter_dict = self._build_filter(
+            repo_id=repo_id,
+            worktree=worktree,
+            include_archived=include_archived,
+        )
         docs = await self._backend.find(
             "conversations",
             filter=filter_dict or None,
-            sort=[("updated_at", -1)],
+            sort=sort or [("updated_at", -1)],
+            limit=limit,
+            offset=offset,
         )
-        infos = [ConversationInfo(**doc) for doc in docs]
-        if not include_archived:
-            infos = [c for c in infos if not c.archived]
-        return infos
+        return [ConversationInfo(**doc) for doc in docs]
+
+    async def count(
+        self,
+        *,
+        repo_id: str | None = None,
+        worktree: str | None = None,
+        include_archived: bool = False,
+    ) -> int:
+        filter_dict = self._build_filter(
+            repo_id=repo_id,
+            worktree=worktree,
+            include_archived=include_archived,
+        )
+        return await self._backend.count(
+            "conversations", filter=filter_dict or None
+        )
 
     def is_busy(self, conv_id: str) -> bool:
         return self._busy.get(conv_id, False)

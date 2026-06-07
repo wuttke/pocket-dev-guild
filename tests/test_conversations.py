@@ -55,7 +55,10 @@ def test_conversation_crud(client: TestClient, tmp_config) -> None:
     assert info["turns"] == []
 
     listing = client.get("/conversations").json()
-    assert [c["id"] for c in listing] == [info["id"]]
+    assert [c["id"] for c in listing["items"]] == [info["id"]]
+    assert listing["total"] == 1
+    assert listing["limit"] == 50
+    assert listing["offset"] == 0
 
     detail = client.get(f"/conversations/{info['id']}").json()
     assert detail["id"] == info["id"]
@@ -315,10 +318,12 @@ def test_archive_hides_conversation_and_blocks_turns(
 
     # Default list excludes archived; include_archived returns both.
     visible = client.get("/conversations").json()
-    assert [c["id"] for c in visible] == [a["id"]]
+    assert [c["id"] for c in visible["items"]] == [a["id"]]
+    assert visible["total"] == 1
     all_ = client.get("/conversations?include_archived=true").json()
-    assert {c["id"] for c in all_} == {a["id"], b["id"]}
-    archived_doc = next(c for c in all_ if c["id"] == b["id"])
+    assert {c["id"] for c in all_["items"]} == {a["id"], b["id"]}
+    assert all_["total"] == 2
+    archived_doc = next(c for c in all_["items"] if c["id"] == b["id"])
     assert archived_doc["archived"] is True
 
     # GET still works (job rows may still reference it).
@@ -332,3 +337,59 @@ def test_archive_hides_conversation_and_blocks_turns(
 
     # Archiving a missing conversation is a 404.
     assert client.delete("/conversations/does-not-exist").status_code == 404
+
+
+def test_list_conversations_filter_sort_paginate(
+    client: TestClient, tmp_config
+) -> None:
+    _ensure_worktree(tmp_config, "feature-a")
+    _ensure_worktree(tmp_config, "feature-b")
+
+    # Create five conversations, alternating worktrees. Insertion order
+    # determines created_at/updated_at because nothing else mutates them.
+    created: list[dict] = []
+    for i in range(5):
+        wt = "feature-a" if i % 2 == 0 else "feature-b"
+        c = client.post(
+            "/conversations",
+            json={"repo_id": "demo", "worktree": wt, "title": f"c{i}"},
+        ).json()
+        created.append(c)
+
+    # Default sort is `-updated_at` → newest first.
+    body = client.get("/conversations").json()
+    assert body["total"] == 5
+    assert body["limit"] == 50
+    assert body["offset"] == 0
+    assert [c["id"] for c in body["items"]] == [
+        c["id"] for c in reversed(created)
+    ]
+
+    # Filter by worktree.
+    feat_a = client.get("/conversations?worktree=feature-a").json()
+    assert feat_a["total"] == 3
+    assert {c["worktree"] for c in feat_a["items"]} == {"feature-a"}
+
+    # Combined filter + ascending sort.
+    asc = client.get(
+        "/conversations?worktree=feature-b&sort=created_at"
+    ).json()
+    assert [c["id"] for c in asc["items"]] == [
+        created[1]["id"], created[3]["id"]
+    ]
+
+    # Pagination: limit=2, offset=2 with default sort returns items[2:4].
+    page = client.get("/conversations?limit=2&offset=2").json()
+    assert page["limit"] == 2
+    assert page["offset"] == 2
+    assert page["total"] == 5
+    expected = list(reversed(created))[2:4]
+    assert [c["id"] for c in page["items"]] == [c["id"] for c in expected]
+
+    # Invalid sort field → 400.
+    assert client.get("/conversations?sort=title").status_code == 400
+
+    # limit/offset bounds.
+    assert client.get("/conversations?limit=0").status_code == 422
+    assert client.get("/conversations?limit=999").status_code == 422
+    assert client.get("/conversations?offset=-1").status_code == 422

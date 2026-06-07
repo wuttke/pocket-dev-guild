@@ -49,6 +49,57 @@ class JobStore:
         record = self._jobs.get(job_id)
         return record.info if record else None
 
+    async def list(
+        self,
+        *,
+        repo_id: str | None = None,
+        worktree: str | None = None,
+        status: JobStatus | None = None,
+        conversation_id: str | None = None,
+        sort: list[tuple[str, int]] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[JobInfo]:
+        infos = [r.info for r in self._jobs.values()]
+        if repo_id is not None:
+            infos = [i for i in infos if i.repo_id == repo_id]
+        if worktree is not None:
+            infos = [i for i in infos if i.worktree == worktree]
+        if status is not None:
+            infos = [i for i in infos if i.status == status]
+        if conversation_id is not None:
+            infos = [i for i in infos if i.conversation_id == conversation_id]
+
+        sort_spec = sort or [("created_at", -1)]
+        for field, direction in reversed(sort_spec):
+            infos.sort(
+                key=lambda i: (getattr(i, field) is None, getattr(i, field, "")),
+                reverse=(direction == -1),
+            )
+        return infos[offset : offset + limit]
+
+    async def count(
+        self,
+        *,
+        repo_id: str | None = None,
+        worktree: str | None = None,
+        status: JobStatus | None = None,
+        conversation_id: str | None = None,
+    ) -> int:
+        n = 0
+        for r in self._jobs.values():
+            i = r.info
+            if repo_id is not None and i.repo_id != repo_id:
+                continue
+            if worktree is not None and i.worktree != worktree:
+                continue
+            if status is not None and i.status != status:
+                continue
+            if conversation_id is not None and i.conversation_id != conversation_id:
+                continue
+            n += 1
+        return n
+
     async def snapshot(self, job_id: str) -> JobLog | None:
         record = self._jobs.get(job_id)
         if not record:

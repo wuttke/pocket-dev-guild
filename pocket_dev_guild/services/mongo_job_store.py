@@ -75,6 +75,70 @@ class MongoJobStore:
             logger.error(f"Failed to get job {job_id}: {e}")
             return None
 
+    def _build_filter(
+        self,
+        *,
+        repo_id: str | None,
+        worktree: str | None,
+        status: JobStatus | None,
+        conversation_id: str | None,
+    ) -> dict[str, object]:
+        f: dict[str, object] = {}
+        if repo_id is not None:
+            f["repo_id"] = repo_id
+        if worktree is not None:
+            f["worktree"] = worktree
+        if status is not None:
+            f["status"] = status
+        if conversation_id is not None:
+            f["conversation_id"] = conversation_id
+        return f
+
+    async def list(
+        self,
+        *,
+        repo_id: str | None = None,
+        worktree: str | None = None,
+        status: JobStatus | None = None,
+        conversation_id: str | None = None,
+        sort: list[tuple[str, int]] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[JobInfo]:
+        try:
+            query = self._build_filter(
+                repo_id=repo_id, worktree=worktree,
+                status=status, conversation_id=conversation_id,
+            )
+            cursor = self._jobs.find(query, {"_id": 0})
+            cursor = cursor.sort(sort or [("created_at", -1)])
+            if offset:
+                cursor = cursor.skip(offset)
+            cursor = cursor.limit(limit)
+            docs = await cursor.to_list(None)
+            return [JobInfo(**_attach_utc(d)) for d in docs]
+        except Exception as e:
+            logger.error(f"Failed to list jobs: {e}")
+            return []
+
+    async def count(
+        self,
+        *,
+        repo_id: str | None = None,
+        worktree: str | None = None,
+        status: JobStatus | None = None,
+        conversation_id: str | None = None,
+    ) -> int:
+        try:
+            query = self._build_filter(
+                repo_id=repo_id, worktree=worktree,
+                status=status, conversation_id=conversation_id,
+            )
+            return await self._jobs.count_documents(query)
+        except Exception as e:
+            logger.error(f"Failed to count jobs: {e}")
+            return 0
+
     async def snapshot(self, job_id: str) -> JobLog | None:
         try:
             job_doc = await self._jobs.find_one({"id": job_id}, {"_id": 0})

@@ -40,9 +40,9 @@ and let the UI pick one per job.
 
 ## Jobs API
 
-- [ ] `GET /jobs` listing endpoint with pagination
-  - Query params: `limit`, `offset`, `repo_id`, `status`, `conversation_id`, `sort`
-  - Response: `{jobs: [...], total, limit, offset}`
+- [x] `GET /jobs` listing endpoint with pagination
+  - Query params: `limit`, `offset`, `repo_id`, `worktree`, `status`, `conversation_id`, `sort`
+  - Response: `{items: [...], total, limit, offset}`
 - [ ] `DELETE /jobs/{job_id}` to cancel/kill running jobs
 
 ## Conversations API
@@ -52,7 +52,9 @@ and let the UI pick one per job.
 - [x] `POST /conversations/{id}/turns`, `GET /conversations/{id}/events`
 - [x] `DELETE /conversations/{id}` — soft archive; hides from list, blocks new turns
 - [x] `archived` field on `ConversationInfo`; opt-in via `?include_archived=true`
-- [ ] Pagination: `limit`, `offset`, `status`, `worktree`, `updated_since`, `sort`
+- [x] Pagination on `GET /conversations`: `limit`, `offset`, `worktree`, `sort`
+  - Response: `{items: [...], total, limit, offset}`
+- [ ] Add `updated_since` / status-style filters to `GET /conversations`
 
 ## Frontend Rewrite
 
