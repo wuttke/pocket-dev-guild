@@ -50,7 +50,7 @@ async def start_job(
         raise HTTPException(404, f"Worktree '{label}' not found at {target}")
 
     if conversation_id is not None:
-        conv = conversations.get(conversation_id)
+        conv = await conversations.get(conversation_id)
         if conv is None:
             raise HTTPException(404, f"Conversation '{conversation_id}' not found")
         if conv.repo_id != repo_id or conv.worktree != worktree:
@@ -106,16 +106,16 @@ async def create_job(
 
 
 @router.get("/{job_id}", response_model=JobInfo, summary="Job metadata")
-def get_job(job_id: str, store: JobStore = Depends(get_store)) -> JobInfo:
-    info = store.get(job_id)
+async def get_job(job_id: str, store: JobStore = Depends(get_store)) -> JobInfo:
+    info = await store.get(job_id)
     if info is None:
         raise HTTPException(404, "Job not found")
     return info
 
 
 @router.get("/{job_id}/log", response_model=JobLog, summary="Full log snapshot")
-def get_job_log(job_id: str, store: JobStore = Depends(get_store)) -> JobLog:
-    snap = store.snapshot(job_id)
+async def get_job_log(job_id: str, store: JobStore = Depends(get_store)) -> JobLog:
+    snap = await store.snapshot(job_id)
     if snap is None:
         raise HTTPException(404, "Job not found")
     return snap
@@ -125,18 +125,18 @@ def get_job_log(job_id: str, store: JobStore = Depends(get_store)) -> JobLog:
 async def stream_job_events(
     job_id: str, store: JobStore = Depends(get_store)
 ) -> EventSourceResponse:
-    if store.get(job_id) is None:
+    if await store.get(job_id) is None:
         raise HTTPException(404, "Job not found")
 
     async def gen():
         position = 0
         while True:
-            info = store.get(job_id)
+            info = await store.get(job_id)
             if info is None:
                 yield {"event": "error", "data": "Job not found"}
                 return
 
-            new_lines = store.log_slice(job_id, position)
+            new_lines = await store.log_slice(job_id, position)
             for line in new_lines:
                 yield {"event": "log", "data": line.model_dump_json()}
             position += len(new_lines)

@@ -51,11 +51,11 @@ def create_conversation(
 @router.get(
     "", response_model=list[ConversationInfo], summary="List conversations"
 )
-def list_conversations(
+async def list_conversations(
     repo_id: Annotated[str | None, Query(pattern=IDENT_PATTERN)] = None,
     conversations: ConversationStore = Depends(get_conversations),
 ) -> list[ConversationInfo]:
-    return conversations.list(repo_id=repo_id)
+    return await conversations.list(repo_id=repo_id)
 
 
 @router.get(
@@ -63,11 +63,11 @@ def list_conversations(
     response_model=ConversationInfo,
     summary="Get a conversation",
 )
-def get_conversation(
+async def get_conversation(
     conversation_id: Annotated[str, Path(min_length=1)],
     conversations: ConversationStore = Depends(get_conversations),
 ) -> ConversationInfo:
-    conv = conversations.get(conversation_id)
+    conv = await conversations.get(conversation_id)
     if conv is None:
         raise HTTPException(404, "Conversation not found")
     return conv
@@ -86,7 +86,7 @@ async def create_turn(
     runner: AugmentRunner = Depends(get_runner),
     conversations: ConversationStore = Depends(get_conversations),
 ) -> JobCreated:
-    conv = conversations.get(conversation_id)
+    conv = await conversations.get(conversation_id)
     if conv is None:
         raise HTTPException(404, "Conversation not found")
     return await start_job(
@@ -140,7 +140,7 @@ async def _conversation_event_stream(
             {"conversation": info.model_dump(mode="json"), "busy": busy}
         )
 
-    state = conversations.state(conversation_id)
+    state = await conversations.state(conversation_id)
     if state is None:
         yield {"event": "error", "data": "Conversation not found"}
         return
@@ -150,7 +150,7 @@ async def _conversation_event_stream(
 
     while True:
         await conversations.wait_for_update(conversation_id, timeout=15.0)
-        state = conversations.state(conversation_id)
+        state = await conversations.state(conversation_id)
         if state is None:
             yield {"event": "error", "data": "Conversation gone"}
             return

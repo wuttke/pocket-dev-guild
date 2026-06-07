@@ -1,27 +1,27 @@
-"""In-memory job store with asyncio.Condition push semantics."""
+"""In-memory job store."""
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..schemas import JobInfo, JobLog, JobStatus, LogLine
+from .notification_hub import NotificationHub
 
 
 @dataclass
 class _JobRecord:
     info: JobInfo
     log: list[LogLine] = field(default_factory=list)
-    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
 
 
 class JobStore:
     """Thread-unsafe by design — runs entirely on the asyncio event loop."""
 
-    def __init__(self) -> None:
+    def __init__(self, notifications: NotificationHub | None = None) -> None:
         self._jobs: dict[str, _JobRecord] = {}
+        self._notifications = notifications or NotificationHub()
 
     def create(
         self,
@@ -45,17 +45,17 @@ class JobStore:
         self._jobs[job_id] = _JobRecord(info=info)
         return info
 
-    def get(self, job_id: str) -> JobInfo | None:
+    async def get(self, job_id: str) -> JobInfo | None:
         record = self._jobs.get(job_id)
         return record.info if record else None
 
-    def snapshot(self, job_id: str) -> JobLog | None:
+    async def snapshot(self, job_id: str) -> JobLog | None:
         record = self._jobs.get(job_id)
         if not record:
             return None
         return JobLog(**record.info.model_dump(), log=list(record.log))
 
-    def log_slice(self, job_id: str, start: int) -> list[LogLine]:
+    async def log_slice(self, job_id: str, start: int) -> list[LogLine]:
         record = self._jobs.get(job_id)
         if not record:
             return []
@@ -64,8 +64,7 @@ class JobStore:
     async def append_log(self, job_id: str, line: LogLine) -> None:
         record = self._jobs[job_id]
         record.log.append(line)
-        async with record.condition:
-            record.condition.notify_all()
+        await self._notifications.notify(f"job:{job_id}")
 
     async def set_status(
         self, job_id: str, status: JobStatus, returncode: int | None = None
@@ -75,8 +74,7 @@ class JobStore:
         if status in ("finished", "failed"):
             update["finished_at"] = datetime.now(timezone.utc)
         record.info = record.info.model_copy(update=update)
-        async with record.condition:
-            record.condition.notify_all()
+        await self._notifications.notify(f"job:{job_id}")
 
     async def set_session_meta(
         self,
@@ -97,15 +95,7 @@ class JobStore:
         if not update:
             return
         record.info = record.info.model_copy(update=update)
-        async with record.condition:
-            record.condition.notify_all()
+        await self._notifications.notify(f"job:{job_id}")
 
     async def wait_for_update(self, job_id: str, timeout: float = 5.0) -> None:
-        record = self._jobs.get(job_id)
-        if not record:
-            return
-        async with record.condition:
-            try:
-                await asyncio.wait_for(record.condition.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                pass
+        await self._notifications.wait(f"job:{job_id}", timeout=timeout)

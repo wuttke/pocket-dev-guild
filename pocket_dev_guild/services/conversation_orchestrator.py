@@ -32,12 +32,12 @@ async def run_conversation_turn(
     """
     await conversations.mark_busy(conversation_id, True)
     try:
-        conv = conversations.get(conversation_id)
+        conv = await conversations.get(conversation_id)
         resume_session = conv.session_id if conv else None
 
         await runner.run(job_id, cwd, prompt, session_id=resume_session)
 
-        job = jobs.get(job_id)
+        job = await jobs.get(job_id)
         if job is None:
             return
 
