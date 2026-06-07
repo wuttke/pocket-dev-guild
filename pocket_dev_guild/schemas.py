@@ -6,6 +6,7 @@ the generated OpenAPI document is fully typed.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -13,9 +14,14 @@ from pydantic import BaseModel, Field
 JobStatus = Literal["queued", "running", "finished", "failed"]
 LogStream = Literal["stdout", "stderr"]
 
+# Repo IDs and worktree names flow into filesystem paths and URL segments.
+# Restrict them to a conservative subset to rule out traversal, separators,
+# whitespace and shell metacharacters.
+IDENT_PATTERN = r"^[A-Za-z0-9_-]+$"
+
 
 class Repo(BaseModel):
-    id: str
+    id: str = Field(pattern=IDENT_PATTERN)
     name: str
     path: str
 
@@ -40,7 +46,7 @@ class WorktreeInfo(BaseModel):
 
 
 class WorktreeCreate(BaseModel):
-    name: str
+    name: str = Field(pattern=IDENT_PATTERN)
     base_branch: str | None = None
 
 
@@ -54,8 +60,8 @@ class WorktreeRemoved(BaseModel):
 
 
 class JobCreate(BaseModel):
-    repo_id: str
-    worktree: str | None = None
+    repo_id: str = Field(pattern=IDENT_PATTERN)
+    worktree: str | None = Field(default=None, pattern=IDENT_PATTERN)
     prompt: str
 
 
@@ -70,6 +76,8 @@ class JobInfo(BaseModel):
     prompt: str
     status: JobStatus
     returncode: int | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
 
 
 class LogLine(BaseModel):
@@ -84,3 +92,4 @@ class JobLog(JobInfo):
 class JobStatusEvent(BaseModel):
     status: JobStatus
     returncode: int | None = None
+    finished_at: datetime | None = None

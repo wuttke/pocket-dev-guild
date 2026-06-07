@@ -81,7 +81,15 @@ async def stream_job_events(
                 yield {
                     "event": "status",
                     "data": json.dumps(
-                        {"status": info.status, "returncode": info.returncode}
+                        {
+                            "status": info.status,
+                            "returncode": info.returncode,
+                            "finished_at": (
+                                info.finished_at.isoformat()
+                                if info.finished_at is not None
+                                else None
+                            ),
+                        }
                     ),
                 }
                 return

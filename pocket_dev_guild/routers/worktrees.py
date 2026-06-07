@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Path as PathParam
 
 from ..config import RepoRegistry
 from ..deps import get_git, get_registry, get_repo
 from ..schemas import (
+    IDENT_PATTERN,
     Repo,
     WorktreeCreate,
     WorktreeCreated,
@@ -50,7 +53,7 @@ async def create_worktree(
 
 @router.delete("/{name}", response_model=WorktreeRemoved, summary="Remove a worktree")
 async def delete_worktree(
-    name: str,
+    name: Annotated[str, PathParam(pattern=IDENT_PATTERN)],
     repo: Repo = Depends(get_repo),
     registry: RepoRegistry = Depends(get_registry),
     git: GitService = Depends(get_git),

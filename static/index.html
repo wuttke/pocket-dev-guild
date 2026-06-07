@@ -101,6 +101,8 @@ async function runAugment() {
   });
   if (!res.ok) { alert(await res.text()); return; }
   const {job_id} = await res.json();
+  const startedAt = Date.now();
+  log.textContent = `--- Job ${job_id} started ${new Date(startedAt).toISOString()} ---\n`;
 
   if (source) source.close();
   source = new EventSource(`/jobs/${job_id}/events`);
@@ -111,7 +113,9 @@ async function runAugment() {
   });
   source.addEventListener("status", (event) => {
     const status = JSON.parse(event.data);
-    log.textContent += `\n--- Job ${status.status} (rc=${status.returncode}) ---\n`;
+    const finishedAt = status.finished_at ? Date.parse(status.finished_at) : Date.now();
+    const durationS = ((finishedAt - startedAt) / 1000).toFixed(1);
+    log.textContent += `\n--- Job ${status.status} (rc=${status.returncode}) after ${durationS}s ---\n`;
     source.close();
   });
   source.addEventListener("error", () => source.close());

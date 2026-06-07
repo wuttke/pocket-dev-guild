@@ -5,10 +5,12 @@ Tests override these with `app.dependency_overrides[...] = ...`.
 
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, Request
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Path, Request
 
 from .config import RepoRegistry
-from .schemas import Repo
+from .schemas import IDENT_PATTERN, Repo
 from .services.augment_runner import AugmentRunner
 from .services.git_service import GitService
 from .services.job_store import JobStore
@@ -31,7 +33,8 @@ def get_runner(request: Request) -> AugmentRunner:
 
 
 def get_repo(
-    repo_id: str, registry: RepoRegistry = Depends(get_registry)
+    repo_id: Annotated[str, Path(pattern=IDENT_PATTERN)],
+    registry: RepoRegistry = Depends(get_registry),
 ) -> Repo:
     repo = registry.get(repo_id)
     if repo is None:

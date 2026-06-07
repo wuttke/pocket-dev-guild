@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from ..schemas import JobInfo, JobLog, JobStatus, LogLine
 
@@ -31,6 +32,7 @@ class JobStore:
             prompt=prompt,
             status="queued",
             returncode=None,
+            created_at=datetime.now(timezone.utc),
         )
         self._jobs[job_id] = _JobRecord(info=info)
         return info
@@ -61,9 +63,10 @@ class JobStore:
         self, job_id: str, status: JobStatus, returncode: int | None = None
     ) -> None:
         record = self._jobs[job_id]
-        record.info = record.info.model_copy(
-            update={"status": status, "returncode": returncode}
-        )
+        update: dict[str, object] = {"status": status, "returncode": returncode}
+        if status in ("finished", "failed"):
+            update["finished_at"] = datetime.now(timezone.utc)
+        record.info = record.info.model_copy(update=update)
         async with record.condition:
             record.condition.notify_all()
 

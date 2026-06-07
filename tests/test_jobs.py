@@ -50,11 +50,16 @@ def test_job_lifecycle(app_factory, tmp_config) -> None:
         log_events = [json.loads(d) for ev, d in events if ev == "log"]
         status_events = [json.loads(d) for ev, d in events if ev == "status"]
         assert [e["line"] for e in log_events] == ["hello\n", "world\n"]
-        assert status_events[-1] == {"status": "finished", "returncode": 0}
+        final = status_events[-1]
+        assert final["status"] == "finished"
+        assert final["returncode"] == 0
+        assert final["finished_at"] is not None
 
         snapshot = client.get(f"/jobs/{job_id}/log").json()
         assert snapshot["status"] == "finished"
         assert len(snapshot["log"]) == 2
+        assert snapshot["created_at"] is not None
+        assert snapshot["finished_at"] is not None
 
 
 def test_job_unknown_worktree(client: TestClient) -> None:
@@ -63,6 +68,17 @@ def test_job_unknown_worktree(client: TestClient) -> None:
         json={"repo_id": "demo", "worktree": "missing", "prompt": "x"},
     )
     assert response.status_code == 404
+
+
+def test_job_rejects_invalid_identifiers(client: TestClient) -> None:
+    for body in (
+        {"repo_id": "..", "prompt": "x"},
+        {"repo_id": "demo", "worktree": "..", "prompt": "x"},
+        {"repo_id": "demo", "worktree": "a/b", "prompt": "x"},
+        {"repo_id": "with space", "prompt": "x"},
+    ):
+        response = client.post("/jobs", json=body)
+        assert response.status_code == 422, (body, response.text)
 
 
 def test_job_primary_repo(app_factory, tmp_config) -> None:

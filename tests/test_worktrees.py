@@ -43,3 +43,25 @@ def test_list_marks_primary_and_hides_foreign(app_factory, tmp_config) -> None:
 def test_unknown_repo_returns_404(client: TestClient) -> None:
     response = client.get("/repos/nope/worktrees")
     assert response.status_code == 404
+
+
+def test_rejects_invalid_repo_id_in_path(client: TestClient) -> None:
+    for repo_id in ("..", ".", "demo/..", "with space", ""):
+        response = client.get(f"/repos/{repo_id}/worktrees")
+        assert response.status_code in (404, 422), (repo_id, response.text)
+
+
+def test_rejects_invalid_worktree_name_on_create(client: TestClient) -> None:
+    for name in ("..", ".", "a/b", "with space", ""):
+        response = client.post(
+            "/repos/demo/worktrees", json={"name": name}
+        )
+        assert response.status_code == 422, (name, response.text)
+
+
+def test_rejects_invalid_worktree_name_on_delete(client: TestClient) -> None:
+    # "." and ".." get normalised away by the HTTP client before they reach
+    # the server, so we only assert on names that survive URL normalisation.
+    for name in ("with%20space", "a%2Eb%2Ec", "a%3Bb"):
+        response = client.delete(f"/repos/demo/worktrees/{name}")
+        assert response.status_code == 422, (name, response.text)

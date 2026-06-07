@@ -39,6 +39,11 @@ for dev, painful otherwise.
 - [ ] Schema: `jobs(id, repo_id, worktree, agent_id, prompt, status,
       created_at, finished_at, exit_code)` + `job_log(job_id, seq,
       stream, line, ts)`.
+- [x] Expose `created_at` / `finished_at` (UTC, ISO-8601) on `JobInfo`
+      and in the SSE `status` event, so the UI can show
+      "running for 4m12s" / "finished 2025-06-07 14:03". (already wired
+      through the in-memory store; the DB layer just needs to persist
+      the same values.)
 - [ ] Keep the `asyncio.Condition` push semantics on top of the DB —
       writes notify in-process subscribers, SSE generator reads new
       rows by `seq > last_seq`.
