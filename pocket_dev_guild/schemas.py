@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-JobStatus = Literal["queued", "running", "finished", "failed"]
+JobStatus = Literal["queued", "running", "finished", "failed", "cancelled"]
 LogStream = Literal["stdout", "stderr"]
 
 # Repo IDs and worktree names flow into filesystem paths and URL segments.

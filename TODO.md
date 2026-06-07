@@ -40,10 +40,12 @@ and let the UI pick one per job.
 
 ## Jobs API
 
+✅ **Core endpoints implemented**.
 - [x] `GET /jobs` listing endpoint with pagination
   - Query params: `limit`, `offset`, `repo_id`, `worktree`, `status`, `conversation_id`, `sort`
   - Response: `{items: [...], total, limit, offset}`
-- [ ] `DELETE /jobs/{job_id}` to cancel/kill running jobs
+- [x] `DELETE /jobs/{job_id}` to cancel running/queued jobs (SIGTERM
+      with SIGKILL fallback; terminal status `cancelled`)
 
 ## Frontend Rewrite
 

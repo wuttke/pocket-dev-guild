@@ -171,9 +171,9 @@ object carries the counts so the UI can render a meaningful prompt:
   }
 }
 ```
-Archive the conversations via `DELETE /conversations/{id}` and let
-queued/running jobs finish (or cancel them, once `DELETE /jobs/{id}`
-ships) before retrying the worktree deletion.
+Archive the conversations via `DELETE /conversations/{id}` and either
+wait for queued/running jobs to finish or cancel them via
+`DELETE /jobs/{id}` before retrying the worktree deletion.
 
 #### Jobs
 
@@ -204,6 +204,26 @@ Get job metadata.
 - `running`: Job is currently executing
 - `finished`: Job completed successfully
 - `failed`: Job terminated with error
+- `cancelled`: Job was cancelled via `DELETE /jobs/{job_id}`
+
+##### `DELETE /jobs/{job_id}`
+Cancel a queued or running job.
+
+For running jobs the runner sends `SIGTERM` to the subprocess, waits up
+to a grace period, then escalates to `SIGKILL`. For queued jobs the
+status flips directly. Either way the final state is `cancelled` with
+`finished_at` set.
+
+**Response**: `200 OK` — returns the updated `JobInfo` (status will be
+`cancelled` for queued jobs and any job whose subprocess has already
+exited; for running jobs the status may still be `running` for a brief
+window until the subprocess exits — clients should poll `/jobs/{id}` or
+subscribe to `/jobs/{id}/events` to observe the terminal transition).
+
+**Errors**:
+- `404 Not Found` — unknown job id.
+- `409 Conflict` — job is already terminal (`finished`, `failed`, or
+  `cancelled`). Body: `{"detail": "Job already terminal: status=..."}`.
 
 ##### `GET /jobs/{job_id}/log`
 Get full log snapshot (non-streaming).
@@ -406,7 +426,7 @@ Paginated list of jobs with filtering and sorting.
 **Query Parameters**:
 - `repo_id` (optional): Filter by repository
 - `worktree` (optional): Filter by worktree name
-- `status` (optional): `queued` | `running` | `finished` | `failed`. Anything else → `400`.
+- `status` (optional): `queued` | `running` | `finished` | `failed` | `cancelled`. Anything else → `400`.
 - `conversation_id` (optional): Filter by conversation
 - `limit` (optional, default `50`, max `200`)
 - `offset` (optional, default `0`)
@@ -479,7 +499,7 @@ interface WorktreeCreated {
 }
 
 // Jobs
-type JobStatus = 'queued' | 'running' | 'finished' | 'failed';
+type JobStatus = 'queued' | 'running' | 'finished' | 'failed' | 'cancelled';
 type LogStream = 'stdout' | 'stderr';
 
 // Note: Jobs are only created through conversation turns

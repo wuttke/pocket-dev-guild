@@ -121,8 +121,10 @@ class JobStore:
         self, job_id: str, status: JobStatus, returncode: int | None = None
     ) -> None:
         record = self._jobs[job_id]
+        # cancelled is terminal alongside finished/failed — stamp finished_at
+        # so the UI can render an end time and the SSE loop exits.
         update: dict[str, object] = {"status": status, "returncode": returncode}
-        if status in ("finished", "failed"):
+        if status in ("finished", "failed", "cancelled"):
             update["finished_at"] = datetime.now(timezone.utc)
         record.info = record.info.model_copy(update=update)
         await self._notifications.notify(f"job:{job_id}")

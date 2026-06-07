@@ -184,7 +184,7 @@ class MongoJobStore:
     ) -> None:
         try:
             update: dict[str, object] = {"status": status, "returncode": returncode}
-            if status in ("finished", "failed"):
+            if status in ("finished", "failed", "cancelled"):
                 update["finished_at"] = datetime.now(timezone.utc)
 
             await self._jobs.update_one(

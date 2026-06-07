@@ -168,6 +168,31 @@ async def get_job(job_id: str, store: JobStore = Depends(get_store)) -> JobInfo:
     return info
 
 
+@router.delete("/{job_id}", response_model=JobInfo, summary="Cancel a job")
+async def cancel_job(
+    job_id: str,
+    store: JobStore = Depends(get_store),
+    runner: AugmentRunner = Depends(get_runner),
+) -> JobInfo:
+    info = await store.get(job_id)
+    if info is None:
+        raise HTTPException(404, "Job not found")
+    if info.status in ("finished", "failed", "cancelled"):
+        raise HTTPException(
+            409, f"Job already terminal: status={info.status}"
+        )
+    # `runner.cancel` records the cancellation intent and SIGTERMs the
+    # live subprocess (if any). For queued jobs there is no process yet,
+    # so we also flip the store-side status here. If a process was
+    # signalled, the runner's `run` finishes the transition to
+    # `cancelled` once the subprocess exits.
+    signalled = await runner.cancel(job_id)
+    if not signalled:
+        await store.set_status(job_id, "cancelled", returncode=None)
+    updated = await store.get(job_id)
+    return updated if updated is not None else info
+
+
 @router.get("/{job_id}/log", response_model=JobLog, summary="Full log snapshot")
 async def get_job_log(job_id: str, store: JobStore = Depends(get_store)) -> JobLog:
     snap = await store.snapshot(job_id)
@@ -196,7 +221,7 @@ async def stream_job_events(
                 yield {"event": "log", "data": line.model_dump_json()}
             position += len(new_lines)
 
-            if info.status in ("finished", "failed"):
+            if info.status in ("finished", "failed", "cancelled"):
                 yield {
                     "event": "status",
                     "data": json.dumps(

@@ -16,7 +16,7 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -48,6 +48,8 @@ class AugmentRunner(Protocol):
         session_id: str | None = None,
     ) -> None: ...
 
+    async def cancel(self, job_id: str) -> bool: ...
+
     async def discover_session(self, request_id: str) -> str | None: ...
 
     async def summarize(
@@ -62,9 +64,18 @@ class SubprocessAugmentRunner:
     store: JobStore
     binary: str = "auggie"
     prompt_param: str = "--print"
+    # Seconds to wait after SIGTERM before escalating to SIGKILL.
+    cancel_grace: float = 5.0
     # Lazily-created file containing `{"mcpServers": {}}`. Used by
     # `summarize` to skip MCP boot.
     _empty_mcp_config: Path | None = None
+    # Live subprocess handles, keyed by job_id. Populated while a job is
+    # running so `cancel` can SIGTERM it.
+    _processes: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
+    # Job ids that have been asked to cancel. Consulted in `run` so a
+    # cancellation that arrives before/after the process spawn still
+    # lands as `cancelled` rather than `failed` or `finished`.
+    _cancelled: set[str] = field(default_factory=set)
 
     async def run(
         self,
@@ -74,6 +85,11 @@ class SubprocessAugmentRunner:
         *,
         session_id: str | None = None,
     ) -> None:
+        # Pre-spawn cancellation: DELETE arrived while the job was queued.
+        if job_id in self._cancelled:
+            self._cancelled.discard(job_id)
+            await self.store.set_status(job_id, "cancelled", returncode=None)
+            return
         await self.store.set_status(job_id, "running")
         try:
             args: list[str] = [self.binary, self.prompt_param]
@@ -88,21 +104,70 @@ class SubprocessAugmentRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await asyncio.gather(
-                self._pump(process.stdout, job_id, "stdout", capture_ids=True),
-                self._pump(process.stderr, job_id, "stderr", capture_ids=False),
-            )
-            returncode = await process.wait()
-            await self.store.set_status(
-                job_id,
-                "finished" if returncode == 0 else "failed",
-                returncode=returncode,
-            )
+            self._processes[job_id] = process
+            # Race window between set_status("running") and registering the
+            # handle above: a DELETE could have arrived during that gap and
+            # marked the job cancelled without finding a process to signal.
+            # Terminate now so we don't run real work for nothing.
+            if job_id in self._cancelled:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+            try:
+                await asyncio.gather(
+                    self._pump(process.stdout, job_id, "stdout", capture_ids=True),
+                    self._pump(process.stderr, job_id, "stderr", capture_ids=False),
+                )
+                returncode = await process.wait()
+            finally:
+                self._processes.pop(job_id, None)
+            if job_id in self._cancelled:
+                self._cancelled.discard(job_id)
+                await self.store.set_status(
+                    job_id, "cancelled", returncode=returncode
+                )
+            else:
+                await self.store.set_status(
+                    job_id,
+                    "finished" if returncode == 0 else "failed",
+                    returncode=returncode,
+                )
         except Exception as exc:  # noqa: BLE001 — surface to the log stream
+            self._processes.pop(job_id, None)
             await self.store.append_log(
                 job_id, LogLine(stream="stderr", line=f"{exc}\n")
             )
-            await self.store.set_status(job_id, "failed", returncode=-1)
+            if job_id in self._cancelled:
+                self._cancelled.discard(job_id)
+                await self.store.set_status(job_id, "cancelled", returncode=-1)
+            else:
+                await self.store.set_status(job_id, "failed", returncode=-1)
+
+    async def cancel(self, job_id: str) -> bool:
+        """Signal a running job to stop and mark it for cancellation.
+
+        Returns True if a live subprocess was signalled; False if the job
+        had no active process (queued or already terminal). In either case
+        the cancellation flag is recorded so `run` will land on the
+        `cancelled` state if it does end up executing.
+        """
+        self._cancelled.add(job_id)
+        process = self._processes.get(job_id)
+        if process is None:
+            return False
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            return True
+        try:
+            await asyncio.wait_for(process.wait(), timeout=self.cancel_grace)
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        return True
 
     async def _pump(
         self,

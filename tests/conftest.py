@@ -64,6 +64,10 @@ class FakeRunner:
     tests can exercise orchestration: `request_id` is patched onto the
     job during `run` (to mimic the real runner capturing it from
     stdout), and `discover_session`/`summarize` return canned values.
+
+    Mirrors `SubprocessAugmentRunner` cancellation: `cancel(job_id)`
+    records the intent and the script loop checks the flag between
+    lines, landing on `cancelled` instead of `finished`/`failed`.
     """
 
     store: JobStore
@@ -74,6 +78,8 @@ class FakeRunner:
     discovered_session_id: str | None = None
     summary_text: str | None = None
     calls: list[tuple[str, str | None]] = field(default_factory=list)
+    cancelled: set[str] = field(default_factory=set)
+    running: set[str] = field(default_factory=set)
 
     async def run(
         self,
@@ -84,22 +90,45 @@ class FakeRunner:
         session_id: str | None = None,
     ) -> None:
         self.calls.append(("run", session_id))
+        if job_id in self.cancelled:
+            self.cancelled.discard(job_id)
+            await self.store.set_status(job_id, "cancelled", returncode=None)
+            return
         await self.store.set_status(job_id, "running")
-        if session_id is not None:
-            await self.store.set_session_meta(job_id, session_id=session_id)
-        for line in self.script:
-            if self.delay:
-                await asyncio.sleep(self.delay)
-            await self.store.append_log(job_id, line)
-        if self.captured_request_id is not None:
-            await self.store.set_session_meta(
-                job_id, request_id=self.captured_request_id
+        self.running.add(job_id)
+        try:
+            if session_id is not None:
+                await self.store.set_session_meta(job_id, session_id=session_id)
+            for line in self.script:
+                if self.delay:
+                    await asyncio.sleep(self.delay)
+                if job_id in self.cancelled:
+                    self.cancelled.discard(job_id)
+                    await self.store.set_status(
+                        job_id, "cancelled", returncode=None
+                    )
+                    return
+                await self.store.append_log(job_id, line)
+            if self.captured_request_id is not None:
+                await self.store.set_session_meta(
+                    job_id, request_id=self.captured_request_id
+                )
+            if job_id in self.cancelled:
+                self.cancelled.discard(job_id)
+                await self.store.set_status(job_id, "cancelled", returncode=None)
+                return
+            await self.store.set_status(
+                job_id,
+                "finished" if self.returncode == 0 else "failed",
+                returncode=self.returncode,
             )
-        await self.store.set_status(
-            job_id,
-            "finished" if self.returncode == 0 else "failed",
-            returncode=self.returncode,
-        )
+        finally:
+            self.running.discard(job_id)
+
+    async def cancel(self, job_id: str) -> bool:
+        self.calls.append(("cancel", job_id))
+        self.cancelled.add(job_id)
+        return job_id in self.running
 
     async def discover_session(self, request_id: str) -> str | None:
         self.calls.append(("discover_session", request_id))
