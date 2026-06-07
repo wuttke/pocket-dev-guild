@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from .schemas import Repo
+from .schemas import Repo, WorktreeInfo
 
 
 class Settings:
@@ -49,3 +49,27 @@ class RepoRegistry:
 
     def worktree_path(self, repo: Repo, name: str) -> Path:
         return self.worktree_root(repo) / name
+
+    def classify_worktrees(
+        self, repo: Repo, items: list[WorktreeInfo]
+    ) -> list[WorktreeInfo]:
+        """Annotate worktrees with `name` / `is_primary` and drop any
+        whose path does not match our convention."""
+        repo_resolved = Path(repo.path).resolve(strict=False)
+        wt_root = self.worktree_root(repo).resolve(strict=False)
+        out: list[WorktreeInfo] = []
+        for w in items:
+            if not w.path:
+                continue
+            p = Path(w.path).resolve(strict=False)
+            if p == repo_resolved:
+                out.append(w.model_copy(update={"is_primary": True}))
+                continue
+            try:
+                rel = p.relative_to(wt_root)
+            except ValueError:
+                continue
+            if not rel.parts:
+                continue
+            out.append(w.model_copy(update={"name": rel.parts[0]}))
+        return out

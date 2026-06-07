@@ -21,8 +21,15 @@ class Repo(BaseModel):
 
 
 class WorktreeInfo(BaseModel):
-    """Subset of `git worktree list --porcelain` we expose."""
+    """Subset of `git worktree list --porcelain` we expose.
 
+    `name` is derived from the path when it sits under the conventional
+    `{repo_parent}/{repo_name}-worktrees/` prefix, otherwise `None`.
+    `is_primary` is true for the repo's main checkout.
+    """
+
+    name: str | None = None
+    is_primary: bool = False
     path: str | None = None
     branch: str | None = None
     head: str | None = Field(default=None, alias="HEAD")

@@ -23,12 +23,14 @@ router = APIRouter(prefix="/repos/{repo_id}/worktrees", tags=["worktrees"])
 @router.get("", response_model=list[WorktreeInfo], summary="List worktrees")
 async def list_worktrees(
     repo: Repo = Depends(get_repo),
+    registry: RepoRegistry = Depends(get_registry),
     git: GitService = Depends(get_git),
 ) -> list[WorktreeInfo]:
     try:
-        return await git.list_worktrees(Path(repo.path))
+        raw = await git.list_worktrees(Path(repo.path))
     except GitError as exc:
         raise HTTPException(500, str(exc))
+    return registry.classify_worktrees(repo, raw)
 
 
 @router.post("", response_model=WorktreeCreated, summary="Create a worktree")
