@@ -115,6 +115,23 @@ class GitService:
         if code != 0:
             raise GitError(err.strip() or "git worktree remove failed", code)
 
+    async def clone(self, url: str, target: Path) -> None:
+        """Clone a repository from a URL to the target path.
+
+        Args:
+            url: Git repository URL (https, ssh, etc.)
+            target: Destination directory for the clone
+
+        Raises:
+            GitError: If the clone fails
+        """
+        target.parent.mkdir(parents=True, exist_ok=True)
+        code, _, err = await self._run(
+            ["clone", url, str(target)], target.parent
+        )
+        if code != 0:
+            raise GitError(err.strip() or "git clone failed", code)
+
 
 def _split_porcelain(out: str) -> list[list[str]]:
     blocks: list[list[str]] = []

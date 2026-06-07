@@ -3,8 +3,9 @@
 # agent_binary: auggie
 # agent_prompt_param: --print
 
-# Optional: MongoDB connection URL for job and conversation persistence.
+# Optional: MongoDB connection URL for job, conversation, and repository persistence.
 # If not specified, uses in-memory stores (data lost on restart).
+# When specified, repositories are stored in the database instead of this config file.
 #
 # Examples:
 #   Local without auth: mongodb://localhost:27017/pocket_dev_guild
@@ -13,7 +14,14 @@
 #
 # mongodb_url: mongodb://localhost:27017/pocket_dev_guild
 
-repos:
-  - id: example
-    name: example
-    path: /absolute/path/to/example-repo
+# DEPRECATED: The repos section is no longer used. Repositories are now managed
+# via the API endpoints:
+#   - POST /repos - Register an existing repository on disk
+#   - POST /repos/clone - Clone a repository from a URL
+#
+# For migration instructions, see README.md
+#
+# repos:
+#   - id: example
+#     name: example
+#     path: /absolute/path/to/example-repo

@@ -9,16 +9,16 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Path, Request
 
-from .config import RepoRegistry
 from .schemas import IDENT_PATTERN, Repo
 from .services.augment_runner import AugmentRunner
 from .services.conversation_store import ConversationStore
 from .services.git_service import GitService
 from .services.job_store import JobStore
+from .services.repo_store import RepoStore
 
 
-def get_registry(request: Request) -> RepoRegistry:
-    return request.app.state.registry
+def get_repo_store(request: Request) -> RepoStore:
+    return request.app.state.repo_store
 
 
 def get_git(request: Request) -> GitService:
@@ -37,11 +37,11 @@ def get_conversations(request: Request) -> ConversationStore:
     return request.app.state.conversations
 
 
-def get_repo(
+async def get_repo(
     repo_id: Annotated[str, Path(pattern=IDENT_PATTERN)],
-    registry: RepoRegistry = Depends(get_registry),
+    store: RepoStore = Depends(get_repo_store),
 ) -> Repo:
-    repo = registry.get(repo_id)
-    if repo is None:
+    repo = await store.get(repo_id)
+    if repo is None or repo.inactive:
         raise HTTPException(404, f"Repo '{repo_id}' not found")
     return repo

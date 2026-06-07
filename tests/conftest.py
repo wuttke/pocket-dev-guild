@@ -141,29 +141,45 @@ class FakeRunner:
 
 @pytest.fixture()
 def tmp_config(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a temporary repo directory.
+
+    Note: config.yaml is no longer used for repos, but kept for settings.
+    """
     repo_path = tmp_path / "demo"
     repo_path.mkdir()
+    # Initialize as git repo
+    (repo_path / ".git").mkdir()
     config = tmp_path / "config.yaml"
-    config.write_text(
-        yaml.safe_dump(
-            {"repos": [{"id": "demo", "name": "demo", "path": str(repo_path)}]}
-        )
-    )
+    config.write_text(yaml.safe_dump({}))
     return config, repo_path
 
 
 @pytest.fixture()
 def app_factory(tmp_config):
-    config, _repo_path = tmp_config
+    config, repo_path = tmp_config
 
     def _build(*, runner: AugmentRunner | None = None, git: GitService | None = None):
-        return create_app(
+        from pocket_dev_guild.services.repo_store import RepoStore
+
+        # Create in-memory repo store and pre-populate with demo repo
+        repo_store = RepoStore()
+        app = create_app(
             Settings(config_path=config),
             git=git or FakeGit(),
             store=JobStore(),
+            repo_store=repo_store,
             runner=runner,
             static_dir=None,
         )
+
+        # Pre-populate repo store with demo repo
+        # Insert directly into backend to avoid async complications in sync fixture
+        from pocket_dev_guild.schemas import Repo
+        demo_repo = Repo(id="demo", name="demo", path=str(repo_path), inactive=False)
+        import asyncio
+        asyncio.run(repo_store._backend.insert("repos", demo_repo.model_dump()))
+
+        return app
 
     return _build
 
