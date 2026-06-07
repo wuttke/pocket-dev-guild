@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>Pocket Dev Guild</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 960px; }
+    pre { background: #111; color: #eee; padding: 1rem; max-height: 70vh; overflow: auto; }
+    label { display: block; margin-top: 0.5rem; }
+    input, textarea, select { width: 100%; padding: 0.4rem; box-sizing: border-box; }
+    button { margin-top: 0.75rem; padding: 0.5rem 1rem; }
+    .row { display: flex; gap: 1rem; }
+    .row > * { flex: 1; }
+  </style>
+</head>
+<body>
+  <h1>Pocket Dev Guild</h1>
+
+  <div class="row">
+    <div>
+      <label>Repo
+        <select id="repo"></select>
+      </label>
+      <label>Worktree
+        <select id="worktree"></select>
+      </label>
+      <button id="reload">Worktrees neu laden</button>
+    </div>
+    <div>
+      <label>Neuer Worktree-Name
+        <input id="new-worktree" placeholder="feature/foo" />
+      </label>
+      <label>Base-Branch (optional)
+        <input id="base-branch" placeholder="main" />
+      </label>
+      <button id="create-worktree">Worktree anlegen</button>
+    </div>
+  </div>
+
+  <label>Prompt
+    <textarea id="prompt" rows="4" placeholder="Was soll augment tun?"></textarea>
+  </label>
+  <button id="run">augment starten</button>
+
+  <h2>Log</h2>
+  <pre id="log"></pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+let source = null;
+
+async function loadRepos() {
+  const r = await fetch("/repos").then(r => r.json());
+  $("repo").innerHTML = r.map(x => `<option value="${x.id}">${x.name}</option>`).join("");
+  await loadWorktrees();
+}
+
+async function loadWorktrees() {
+  const repoId = $("repo").value;
+  if (!repoId) return;
+  const r = await fetch(`/repos/${repoId}/worktrees`).then(r => r.json());
+  $("worktree").innerHTML = r
+    .filter(w => w.path)
+    .map(w => {
+      const name = w.path.split("/").pop();
+      return `<option value="${name}">${name} (${w.branch || w.head || ""})</option>`;
+    })
+    .join("");
+}
+
+async function createWorktree() {
+  const repoId = $("repo").value;
+  const name = $("new-worktree").value.trim();
+  const baseBranch = $("base-branch").value.trim() || null;
+  if (!name) return;
+  const res = await fetch(`/repos/${repoId}/worktrees`, {
+    method: "POST",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify({name, base_branch: baseBranch}),
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  $("new-worktree").value = "";
+  await loadWorktrees();
+}
+
+async function runAugment() {
+  const repoId = $("repo").value;
+  const name = $("worktree").value;
+  const prompt = $("prompt").value;
+  if (!prompt) return;
+
+  log.textContent = "";
+  const res = await fetch(`/jobs`, {
+    method: "POST",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify({repo_id: repoId, worktree: name, prompt}),
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  const {job_id} = await res.json();
+
+  if (source) source.close();
+  source = new EventSource(`/jobs/${job_id}/events`);
+  source.addEventListener("log", (event) => {
+    const entry = JSON.parse(event.data);
+    log.textContent += `[${entry.stream}] ${entry.line}`;
+    log.scrollTop = log.scrollHeight;
+  });
+  source.addEventListener("status", (event) => {
+    const status = JSON.parse(event.data);
+    log.textContent += `\n--- Job ${status.status} (rc=${status.returncode}) ---\n`;
+    source.close();
+  });
+  source.addEventListener("error", () => source.close());
+}
+
+$("repo").addEventListener("change", loadWorktrees);
+$("reload").addEventListener("click", loadWorktrees);
+$("create-worktree").addEventListener("click", createWorktree);
+$("run").addEventListener("click", runAugment);
+loadRepos();
+</script>
+</body>
+</html>
