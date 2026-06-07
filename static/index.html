@@ -25,11 +25,13 @@
         <select id="worktree"></select>
       </label>
       <button id="reload">Worktrees neu laden</button>
+      <button id="delete-worktree">Worktree löschen</button>
     </div>
     <div>
       <label>Neuer Branch
         <input id="new-branch" placeholder="feature/foo" />
       </label>
+      <label><input type="checkbox" id="existing-branch" /> existierenden Branch auschecken</label>
       <button id="create-worktree">Worktree anlegen</button>
     </div>
   </div>
@@ -73,13 +75,26 @@ async function createWorktree() {
   const repoId = $("repo").value;
   const branch = $("new-branch").value.trim();
   if (!branch) return;
-  const res = await fetch(`/repos/${repoId}/worktrees`, {
+  const existing = $("existing-branch").checked;
+  const url = `/repos/${repoId}/worktrees${existing ? "?existing=true" : ""}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: {"content-type": "application/json"},
     body: JSON.stringify({branch}),
   });
   if (!res.ok) { alert(await res.text()); return; }
   $("new-branch").value = "";
+  $("existing-branch").checked = false;
+  await loadWorktrees();
+}
+
+async function deleteWorktree() {
+  const repoId = $("repo").value;
+  const name = $("worktree").value;
+  if (!name) { alert("Primary checkout kann nicht gelöscht werden."); return; }
+  if (!confirm(`Worktree '${name}' wirklich löschen?`)) return;
+  const res = await fetch(`/repos/${repoId}/worktrees/${name}`, {method: "DELETE"});
+  if (!res.ok) { alert(await res.text()); return; }
   await loadWorktrees();
 }
 
@@ -120,6 +135,7 @@ async function runAugment() {
 $("repo").addEventListener("change", loadWorktrees);
 $("reload").addEventListener("click", loadWorktrees);
 $("create-worktree").addEventListener("click", createWorktree);
+$("delete-worktree").addEventListener("click", deleteWorktree);
 $("run").addEventListener("click", runAugment);
 loadRepos();
 </script>
