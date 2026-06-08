@@ -14,14 +14,6 @@
 #
 # mongodb_url: mongodb://localhost:27017/pocket_dev_guild
 
-# DEPRECATED: The repos section is no longer used. Repositories are now managed
-# via the API endpoints:
-#   - POST /repos - Register an existing repository on disk
-#   - POST /repos/clone - Clone a repository from a URL
-#
-# For migration instructions, see README.md
-#
-# repos:
-#   - id: example
-#     name: example
-#     path: /absolute/path/to/example-repo
+# Repositories are managed via the API:
+#   - POST /repos        register an existing clone on disk
+#   - POST /repos/clone  clone from a URL and register it
