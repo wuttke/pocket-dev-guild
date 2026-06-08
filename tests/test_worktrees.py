@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from pocket_dev_guild.schemas import WorktreeInfo
@@ -335,3 +337,142 @@ def test_archive_conversations_with_active_jobs_still_blocks(client: TestClient)
     assert detail["active_jobs"] == 1
     # Conversation should have been archived before the check
     assert detail["conversations"] == 0
+
+
+def test_worktree_status_clean(app_factory, tmp_config) -> None:
+    """Test status endpoint returns clean for a clean worktree with upstream."""
+    from pocket_dev_guild.services.git_service import GitService
+
+    _config, repo_path = tmp_config
+
+    # Create a real worktree directory with a git repo
+    wt_path = repo_path.parent / "demo-worktrees" / "feature_clean"
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize a git repo in the worktree
+    import subprocess
+    subprocess.run(["git", "init"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=wt_path, check=True)
+
+    # Create and commit a file to make it a valid repo
+    (wt_path / "test.txt").write_text("test")
+    subprocess.run(["git", "add", "."], cwd=wt_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=wt_path, check=True)
+
+    # Create a bare repo to act as "remote" and set up tracking
+    remote_path = repo_path.parent / "demo-remote-clean"
+    remote_path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "--bare"], cwd=remote_path, check=True)
+
+    # Rename to main branch and set up tracking
+    subprocess.run(["git", "branch", "-M", "main"], cwd=wt_path, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote_path)], cwd=wt_path, check=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=wt_path, check=True)
+
+    # Use real GitService for this test
+    app = app_factory(git=GitService())
+
+    with TestClient(app) as client:
+        resp = client.get("/api/repos/demo/worktrees/feature_clean/status")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["is_clean"] is True
+        assert data["messages"] == []
+
+
+def test_worktree_status_uncommitted_changes(app_factory, tmp_config) -> None:
+    """Test status endpoint detects uncommitted changes."""
+    from pocket_dev_guild.services.git_service import GitService
+
+    _config, repo_path = tmp_config
+
+    # Create a real worktree directory with a git repo
+    wt_path = repo_path.parent / "demo-worktrees" / "feature_dirty"
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize a git repo
+    import subprocess
+    subprocess.run(["git", "init"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=wt_path, check=True)
+
+    # Create and commit a file
+    (wt_path / "test.txt").write_text("test")
+    subprocess.run(["git", "add", "."], cwd=wt_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=wt_path, check=True)
+
+    # Create uncommitted changes
+    (wt_path / "test.txt").write_text("modified")
+    (wt_path / "untracked.txt").write_text("new file")
+
+    # Use real GitService for this test
+    app = app_factory(git=GitService())
+
+    with TestClient(app) as client:
+        resp = client.get("/api/repos/demo/worktrees/feature_dirty/status")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["is_clean"] is False
+        assert len(data["messages"]) >= 1
+        # Check for uncommitted changes message
+        assert any("Uncommitted changes" in msg for msg in data["messages"])
+        # Check for untracked files message
+        assert any("Untracked files" in msg for msg in data["messages"])
+
+
+def test_worktree_status_unpushed_commits(app_factory, tmp_config) -> None:
+    """Test status endpoint detects unpushed commits."""
+    from pocket_dev_guild.services.git_service import GitService
+
+    _config, repo_path = tmp_config
+
+    # Create a real worktree directory with a git repo
+    wt_path = repo_path.parent / "demo-worktrees" / "feature_unpushed"
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize a git repo with a remote
+    import subprocess
+    subprocess.run(["git", "init"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=wt_path, check=True)
+
+    # Create initial commit
+    (wt_path / "test.txt").write_text("test")
+    subprocess.run(["git", "add", "."], cwd=wt_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=wt_path, check=True)
+
+    # Create a branch and set up tracking (simulate a remote)
+    subprocess.run(["git", "checkout", "-b", "main"], cwd=wt_path, check=True)
+
+    # Create a bare repo to act as "remote"
+    remote_path = repo_path.parent / "demo-remote"
+    remote_path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "--bare"], cwd=remote_path, check=True)
+
+    # Add remote and push
+    subprocess.run(["git", "remote", "add", "origin", str(remote_path)], cwd=wt_path, check=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=wt_path, check=True)
+
+    # Create unpushed commit
+    (wt_path / "test.txt").write_text("modified")
+    subprocess.run(["git", "add", "."], cwd=wt_path, check=True)
+    subprocess.run(["git", "commit", "-m", "unpushed"], cwd=wt_path, check=True)
+
+    # Use real GitService for this test
+    app = app_factory(git=GitService())
+
+    with TestClient(app) as client:
+        resp = client.get("/api/repos/demo/worktrees/feature_unpushed/status")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["is_clean"] is False
+        assert len(data["messages"]) >= 1
+        # Check for unpushed commits message
+        assert any("Unpushed commits" in msg for msg in data["messages"])
+
+
+def test_worktree_status_not_found(client: TestClient) -> None:
+    """Test status endpoint returns 404 for non-existent worktree."""
+    resp = client.get("/api/repos/demo/worktrees/nonexistent/status")
+    assert resp.status_code == 404, resp.text

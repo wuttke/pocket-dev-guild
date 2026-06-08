@@ -113,7 +113,23 @@ async function deleteWorktree() {
   const repoId = $("repo").value;
   const name = $("worktree").value;
   if (!name) { alert("Primary checkout kann nicht gelöscht werden."); return; }
-  if (!confirm(`Worktree '${name}' wirklich löschen?`)) return;
+
+  // Check worktree status first
+  const statusRes = await fetch(`/api/repos/${repoId}/worktrees/${name}/status`);
+  if (statusRes.ok) {
+    const status = await statusRes.json();
+    if (!status.is_clean) {
+      const warnings = status.messages.join('\n');
+      const message = `Warnung: Worktree '${name}' ist nicht sauber:\n\n${warnings}\n\nTrotzdem löschen?`;
+      if (!confirm(message)) return;
+    } else {
+      if (!confirm(`Worktree '${name}' wirklich löschen?`)) return;
+    }
+  } else {
+    // If status check fails, just ask for confirmation
+    if (!confirm(`Worktree '${name}' wirklich löschen?`)) return;
+  }
+
   const res = await fetch(`/api/repos/${repoId}/worktrees/${name}`, {method: "DELETE"});
   if (!res.ok) { alert(await res.text()); return; }
   await loadWorktrees();

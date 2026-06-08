@@ -238,6 +238,26 @@ the user to archive conversations or cancel jobs first:
 }
 ```
 
+### Worktree status check
+
+`GET /api/repos/{id}/worktrees/{name}/status` checks if a worktree is
+clean (no uncommitted changes, no unpushed commits) before deletion.
+The frontend calls this to warn users about potential data loss:
+
+```json
+{
+  "is_clean": false,
+  "messages": [
+    "Uncommitted changes in 3 file(s)",
+    "Untracked files: 2 file(s)",
+    "Unpushed commits: 2 commit(s) on branch feature/foo"
+  ]
+}
+```
+
+When `is_clean` is `true`, `messages` is empty. Deletion is always
+allowed regardless of status — this is purely advisory.
+
 ## Interesting flows
 
 ### Starting a conversation and its first turn

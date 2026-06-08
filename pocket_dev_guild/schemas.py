@@ -86,6 +86,18 @@ class WorktreeRemoved(BaseModel):
     removed: str
 
 
+class WorktreeStatus(BaseModel):
+    """Status information for a worktree before deletion.
+
+    `is_clean` is True when the worktree has no uncommitted changes and
+    no unpushed commits. `messages` contains a list of warnings when
+    `is_clean` is False.
+    """
+
+    is_clean: bool
+    messages: list[str] = Field(default_factory=list)
+
+
 class JobCreate(BaseModel):
     repo_id: str = Field(pattern=IDENT_PATTERN)
     worktree: str | None = Field(default=None, pattern=IDENT_PATTERN)

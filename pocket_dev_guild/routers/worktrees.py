@@ -16,6 +16,7 @@ from ..schemas import (
     WorktreeCreated,
     WorktreeInfo,
     WorktreeRemoved,
+    WorktreeStatus,
 )
 from ..services.conversation_store import ConversationStore
 from ..services.git_service import GitError, GitService
@@ -71,6 +72,31 @@ async def create_worktree(
     except GitError as exc:
         raise HTTPException(400, str(exc))
     return WorktreeCreated(name=name, path=str(target))
+
+
+@router.get("/{name}/status", response_model=WorktreeStatus, summary="Check worktree status")
+async def get_worktree_status(
+    name: Annotated[str, PathParam(pattern=IDENT_PATTERN)],
+    repo: Repo = Depends(get_repo),
+    store: RepoStore = Depends(get_repo_store),
+    git: GitService = Depends(get_git),
+) -> WorktreeStatus:
+    """Check if a worktree is clean before deletion.
+
+    Returns status information indicating whether the worktree has uncommitted
+    changes or unpushed commits. The frontend can call this before deleting
+    a worktree to warn the user about potential data loss.
+    """
+    target = store.worktree_path(repo, name)
+    if not target.exists():
+        raise HTTPException(404, f"Worktree '{name}' not found at {target}")
+
+    try:
+        is_clean, messages = await git.check_worktree_status(target)
+    except GitError as exc:
+        raise HTTPException(500, str(exc))
+
+    return WorktreeStatus(is_clean=is_clean, messages=messages)
 
 
 @router.delete("/{name}", response_model=WorktreeRemoved, summary="Remove a worktree")

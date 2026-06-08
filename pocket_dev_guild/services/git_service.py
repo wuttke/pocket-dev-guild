@@ -132,6 +132,91 @@ class GitService:
         if code != 0:
             raise GitError(err.strip() or "git clone failed", code)
 
+    async def check_worktree_status(self, worktree_path: Path) -> tuple[bool, list[str]]:
+        """Check if a worktree is clean (no uncommitted changes, no unpushed commits).
+
+        Args:
+            worktree_path: Path to the worktree to check
+
+        Returns:
+            Tuple of (is_clean, messages) where is_clean is True if the worktree
+            has no uncommitted changes and no unpushed commits, and messages is a
+            list of warning strings when is_clean is False.
+
+        Raises:
+            GitError: If git commands fail
+        """
+        messages: list[str] = []
+
+        # Check for uncommitted changes (including untracked files)
+        code, out, err = await self._run(
+            ["status", "--porcelain"], worktree_path
+        )
+        if code != 0:
+            raise GitError(err.strip() or "git status failed", code)
+
+        if out.strip():
+            # Parse the status output to provide specific messages
+            lines = out.strip().split('\n')
+            modified_files = []
+            untracked_files = []
+
+            for line in lines:
+                if not line:
+                    continue
+                status = line[:2]
+                filename = line[3:] if len(line) > 3 else ""
+
+                # Check for modified, added, deleted files (staged or unstaged)
+                if status.strip() and status != "??":
+                    modified_files.append(filename)
+                # Check for untracked files
+                elif status == "??":
+                    untracked_files.append(filename)
+
+            if modified_files:
+                messages.append(f"Uncommitted changes in {len(modified_files)} file(s)")
+            if untracked_files:
+                messages.append(f"Untracked files: {len(untracked_files)} file(s)")
+
+        # Check for unpushed commits
+        # First, get the current branch
+        code, branch_out, err = await self._run(
+            ["rev-parse", "--abbrev-ref", "HEAD"], worktree_path
+        )
+        if code != 0:
+            raise GitError(err.strip() or "git rev-parse failed", code)
+
+        current_branch = branch_out.strip()
+
+        # Skip unpushed commit check if in detached HEAD state
+        if current_branch != "HEAD":
+            # Get the upstream branch
+            code, upstream_out, _ = await self._run(
+                ["rev-parse", "--abbrev-ref", f"{current_branch}@{{upstream}}"],
+                worktree_path
+            )
+
+            if code == 0:
+                # Upstream exists, check for unpushed commits
+                upstream = upstream_out.strip()
+                code, diff_out, err = await self._run(
+                    ["rev-list", f"{upstream}..{current_branch}", "--count"],
+                    worktree_path
+                )
+                if code != 0:
+                    raise GitError(err.strip() or "git rev-list failed", code)
+
+                unpushed_count = int(diff_out.strip())
+                if unpushed_count > 0:
+                    messages.append(f"Unpushed commits: {unpushed_count} commit(s) on branch {current_branch}")
+            else:
+                # No upstream branch configured
+                messages.append(f"No upstream branch configured for {current_branch}")
+
+        is_clean = len(messages) == 0
+        return is_clean, messages
+
 
 def _split_porcelain(out: str) -> list[list[str]]:
     blocks: list[list[str]] = []
