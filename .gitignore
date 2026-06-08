@@ -27,3 +27,8 @@ htmlcov/
 
 # local config (use config.example.yaml as template)
 /config.yaml
+
+# local logs and runtime files
+nohup.out
+/tmp/pdg-uvicorn.log
+/tmp/pdg-uvicorn.pid
