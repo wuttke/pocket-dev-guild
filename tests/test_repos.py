@@ -10,7 +10,9 @@ def test_list_repos(client: TestClient) -> None:
     response = client.get("/repos")
     assert response.status_code == 200
     data = response.json()
-    assert data == [{"id": "demo", "name": "demo", "path": data[0]["path"]}]
+    assert data == [
+        {"id": "demo", "name": "demo", "path": data[0]["path"], "inactive": False}
+    ]
 
 
 def test_openapi_contains_typed_models(client: TestClient) -> None:

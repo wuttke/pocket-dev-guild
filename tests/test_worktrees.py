@@ -67,9 +67,13 @@ def test_unknown_repo_returns_404(client: TestClient) -> None:
 
 
 def test_rejects_invalid_repo_id_in_path(client: TestClient) -> None:
+    # Some inputs (".", "..", "demo/..") get normalized by the HTTP client
+    # and land on a different route (e.g. DELETE /repos/{repo_id}), which
+    # responds 405 to a GET. That's still a rejection of the worktrees
+    # handler — accept it alongside 404 / 422.
     for repo_id in ("..", ".", "demo/..", "with space", ""):
         response = client.get(f"/repos/{repo_id}/worktrees")
-        assert response.status_code in (404, 422), (repo_id, response.text)
+        assert response.status_code in (404, 405, 422), (repo_id, response.text)
 
 
 def test_rejects_invalid_branch_pattern_on_create(client: TestClient) -> None:
