@@ -16,6 +16,7 @@ from ..schemas import (
     ConversationInfo,
     ConversationListResponse,
     ConversationTurnCreate,
+    ConversationUpdate,
     JobCreated,
 )
 from ..services.augment_runner import AugmentRunner
@@ -109,6 +110,26 @@ async def get_conversation(
     if conv is None:
         raise HTTPException(404, "Conversation not found")
     return conv
+
+
+@router.put(
+    "/{conversation_id}",
+    response_model=ConversationInfo,
+    summary="Update a conversation",
+)
+async def update_conversation(
+    conversation_id: Annotated[str, Path(min_length=1)],
+    body: ConversationUpdate,
+    conversations: ConversationStore = Depends(get_conversations),
+) -> ConversationInfo:
+    conv = await conversations.get(conversation_id)
+    if conv is None:
+        raise HTTPException(404, "Conversation not found")
+    await conversations.patch(conversation_id, title=body.title)
+    updated_conv = await conversations.get(conversation_id)
+    if updated_conv is None:
+        raise HTTPException(404, "Conversation not found")
+    return updated_conv
 
 
 @router.delete(
