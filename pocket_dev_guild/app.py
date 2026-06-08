@@ -87,6 +87,10 @@ def create_app(
         version="0.1.0",
         summary="Manage git worktrees and run augment from a small web UI.",
         lifespan=lifespan,
+        # OpenAPI endpoints also under /api
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+        openapi_url="/api/openapi.json",
     )
 
     app.state.settings = settings
@@ -100,10 +104,11 @@ def create_app(
         prompt_param=settings.agent_prompt_param,
     )
 
-    app.include_router(repos.router)
-    app.include_router(worktrees.router)
-    app.include_router(jobs.router)
-    app.include_router(conversations.router)
+    # All API routes under /api prefix, keeping frontend on /
+    app.include_router(repos.router, prefix="/api")
+    app.include_router(worktrees.router, prefix="/api")
+    app.include_router(jobs.router, prefix="/api")
+    app.include_router(conversations.router, prefix="/api")
 
     if static_dir is not None:
         path = Path(static_dir)

@@ -32,7 +32,7 @@ def _make_app(app_factory, runner_kwargs):
 def _wait_for(client: TestClient, conv_id: str, predicate, timeout: float = 2.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        info = client.get(f"/conversations/{conv_id}").json()
+        info = client.get(f"/api/conversations/{conv_id}").json()
         if predicate(info):
             return info
         time.sleep(0.02)
@@ -43,7 +43,7 @@ def test_conversation_crud(client: TestClient, tmp_config) -> None:
     _ensure_worktree(tmp_config)
 
     create = client.post(
-        "/conversations",
+        "/api/conversations",
         json={"repo_id": "demo", "worktree": "feature-a", "title": "t1"},
     )
     assert create.status_code == 200, create.text
@@ -54,24 +54,24 @@ def test_conversation_crud(client: TestClient, tmp_config) -> None:
     assert info["session_id"] is None
     assert info["turns"] == []
 
-    listing = client.get("/conversations").json()
+    listing = client.get("/api/conversations").json()
     assert [c["id"] for c in listing["items"]] == [info["id"]]
     assert listing["total"] == 1
     assert listing["limit"] == 50
     assert listing["offset"] == 0
 
-    detail = client.get(f"/conversations/{info['id']}").json()
+    detail = client.get(f"/api/conversations/{info['id']}").json()
     assert detail["id"] == info["id"]
 
-    assert client.get("/conversations/does-not-exist").status_code == 404
+    assert client.get("/api/conversations/does-not-exist").status_code == 404
 
 
 def test_conversation_rejects_unknown_repo_or_worktree(client: TestClient) -> None:
     assert (
-        client.post("/conversations", json={"repo_id": "demo", "worktree": "nope"}).status_code
+        client.post("/api/conversations", json={"repo_id": "demo", "worktree": "nope"}).status_code
         == 404
     )
-    assert client.post("/conversations", json={"repo_id": "missing"}).status_code == 404
+    assert client.post("/api/conversations", json={"repo_id": "missing"}).status_code == 404
 
 
 def test_conversation_turn_discovers_session_and_summary(
@@ -89,11 +89,11 @@ def test_conversation_turn_discovers_session_and_summary(
     )
     with TestClient(app) as client:
         conv = client.post(
-            "/conversations",
+            "/api/conversations",
             json={"repo_id": "demo", "worktree": "feature-a"},
         ).json()
         turn1 = client.post(
-            f"/conversations/{conv['id']}/turns", json={"prompt": "p1"}
+            f"/api/conversations/{conv['id']}/turns", json={"prompt": "p1"}
         )
         assert turn1.status_code == 200, turn1.text
         job1_id = turn1.json()["job_id"]
@@ -110,7 +110,7 @@ def test_conversation_turn_discovers_session_and_summary(
         # Second turn resumes the discovered session.
         runner.calls.clear()
         turn2 = client.post(
-            f"/conversations/{conv['id']}/turns", json={"prompt": "p2"}
+            f"/api/conversations/{conv['id']}/turns", json={"prompt": "p2"}
         )
         assert turn2.status_code == 200, turn2.text
         _wait_for(
@@ -137,15 +137,15 @@ def test_conversation_turn_rejects_parallel(app_factory, tmp_config) -> None:
     )
     with TestClient(app) as client:
         conv = client.post(
-            "/conversations",
+            "/api/conversations",
             json={"repo_id": "demo", "worktree": "feature-a"},
         ).json()
         first = client.post(
-            f"/conversations/{conv['id']}/turns", json={"prompt": "p1"}
+            f"/api/conversations/{conv['id']}/turns", json={"prompt": "p1"}
         )
         assert first.status_code == 200, first.text
         second = client.post(
-            f"/conversations/{conv['id']}/turns", json={"prompt": "p2"}
+            f"/api/conversations/{conv['id']}/turns", json={"prompt": "p2"}
         )
         assert second.status_code == 409, second.text
 
@@ -163,7 +163,7 @@ def test_jobs_endpoint_accepts_conversation_id(app_factory, tmp_config) -> None:
     )
     with TestClient(app) as client:
         conv = client.post(
-            "/conversations",
+            "/api/conversations",
             json={"repo_id": "demo", "worktree": "feature-a"},
         ).json()
         # Mismatched worktree → 409.
@@ -295,7 +295,7 @@ async def test_conversation_events_full_flow() -> None:
 
 
 def test_conversation_events_404_for_missing(client: TestClient) -> None:
-    resp = client.get("/conversations/does-not-exist/events")
+    resp = client.get("/api/conversations/does-not-exist/events")
     assert resp.status_code == 404
 
 
@@ -304,39 +304,39 @@ def test_archive_hides_conversation_and_blocks_turns(
 ) -> None:
     _ensure_worktree(tmp_config)
     a = client.post(
-        "/conversations",
+        "/api/conversations",
         json={"repo_id": "demo", "worktree": "feature-a", "title": "keep"},
     ).json()
     b = client.post(
-        "/conversations",
+        "/api/conversations",
         json={"repo_id": "demo", "worktree": "feature-a", "title": "gone"},
     ).json()
 
     # Archive `b`.
-    resp = client.delete(f"/conversations/{b['id']}")
+    resp = client.delete(f"/api/conversations/{b['id']}")
     assert resp.status_code == 204, resp.text
 
     # Default list excludes archived; include_archived returns both.
-    visible = client.get("/conversations").json()
+    visible = client.get("/api/conversations").json()
     assert [c["id"] for c in visible["items"]] == [a["id"]]
     assert visible["total"] == 1
-    all_ = client.get("/conversations?include_archived=true").json()
+    all_ = client.get("/api/conversations?include_archived=true").json()
     assert {c["id"] for c in all_["items"]} == {a["id"], b["id"]}
     assert all_["total"] == 2
     archived_doc = next(c for c in all_["items"] if c["id"] == b["id"])
     assert archived_doc["archived"] is True
 
     # GET still works (job rows may still reference it).
-    assert client.get(f"/conversations/{b['id']}").status_code == 200
+    assert client.get(f"/api/conversations/{b['id']}").status_code == 200
 
     # New turns are rejected.
     turn = client.post(
-        f"/conversations/{b['id']}/turns", json={"prompt": "p"}
+        f"/api/conversations/{b['id']}/turns", json={"prompt": "p"}
     )
     assert turn.status_code == 409, turn.text
 
     # Archiving a missing conversation is a 404.
-    assert client.delete("/conversations/does-not-exist").status_code == 404
+    assert client.delete("/api/conversations/does-not-exist").status_code == 404
 
 
 def test_list_conversations_filter_sort_paginate(
@@ -351,13 +351,13 @@ def test_list_conversations_filter_sort_paginate(
     for i in range(5):
         wt = "feature-a" if i % 2 == 0 else "feature-b"
         c = client.post(
-            "/conversations",
+            "/api/conversations",
             json={"repo_id": "demo", "worktree": wt, "title": f"c{i}"},
         ).json()
         created.append(c)
 
     # Default sort is `-updated_at` → newest first.
-    body = client.get("/conversations").json()
+    body = client.get("/api/conversations").json()
     assert body["total"] == 5
     assert body["limit"] == 50
     assert body["offset"] == 0
@@ -366,20 +366,20 @@ def test_list_conversations_filter_sort_paginate(
     ]
 
     # Filter by worktree.
-    feat_a = client.get("/conversations?worktree=feature-a").json()
+    feat_a = client.get("/api/conversations?worktree=feature-a").json()
     assert feat_a["total"] == 3
     assert {c["worktree"] for c in feat_a["items"]} == {"feature-a"}
 
     # Combined filter + ascending sort.
     asc = client.get(
-        "/conversations?worktree=feature-b&sort=created_at"
+        "/api/conversations?worktree=feature-b&sort=created_at"
     ).json()
     assert [c["id"] for c in asc["items"]] == [
         created[1]["id"], created[3]["id"]
     ]
 
     # Pagination: limit=2, offset=2 with default sort returns items[2:4].
-    page = client.get("/conversations?limit=2&offset=2").json()
+    page = client.get("/api/conversations?limit=2&offset=2").json()
     assert page["limit"] == 2
     assert page["offset"] == 2
     assert page["total"] == 5
@@ -387,12 +387,12 @@ def test_list_conversations_filter_sort_paginate(
     assert [c["id"] for c in page["items"]] == [c["id"] for c in expected]
 
     # Invalid sort field → 400.
-    assert client.get("/conversations?sort=title").status_code == 400
+    assert client.get("/api/conversations?sort=title").status_code == 400
 
     # limit/offset bounds.
-    assert client.get("/conversations?limit=0").status_code == 422
-    assert client.get("/conversations?limit=999").status_code == 422
-    assert client.get("/conversations?offset=-1").status_code == 422
+    assert client.get("/api/conversations?limit=0").status_code == 422
+    assert client.get("/api/conversations?limit=999").status_code == 422
+    assert client.get("/api/conversations?offset=-1").status_code == 422
 
 
 @pytest.mark.asyncio
@@ -436,30 +436,30 @@ def test_list_conversations_updated_since_query(
     _ensure_worktree(tmp_config)
 
     first = client.post(
-        "/conversations",
+        "/api/conversations",
         json={"repo_id": "demo", "worktree": "feature-a", "title": "old"},
     ).json()
     time.sleep(0.01)
     second = client.post(
-        "/conversations",
+        "/api/conversations",
         json={"repo_id": "demo", "worktree": "feature-a", "title": "new"},
     ).json()
 
     # ISO 8601 with Z suffix: only `second` (created strictly after first).
     cutoff = second["updated_at"]
-    body = client.get(f"/conversations?updated_since={cutoff}").json()
+    body = client.get(f"/api/conversations?updated_since={cutoff}").json()
     assert [c["id"] for c in body["items"]] == [second["id"]]
     assert body["total"] == 1
 
     # Cutoff at/before first → both rows match.
     body = client.get(
-        f"/conversations?updated_since={first['updated_at']}"
+        f"/api/conversations?updated_since={first['updated_at']}"
     ).json()
     assert {c["id"] for c in body["items"]} == {first["id"], second["id"]}
     assert body["total"] == 2
 
     # Garbage value → 422 from FastAPI.
     assert (
-        client.get("/conversations?updated_since=not-a-date").status_code
+        client.get("/api/conversations?updated_since=not-a-date").status_code
         == 422
     )

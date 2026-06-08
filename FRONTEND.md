@@ -59,15 +59,15 @@ The application is designed to be accessed primarily via mobile devices, with re
 - **Production**: Configure via environment
 
 ### OpenAPI Documentation
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-- OpenAPI JSON: `http://localhost:8000/openapi.json`
+- Swagger UI: `http://localhost:8000/api/docs`
+- ReDoc: `http://localhost:8000/api/redoc`
+- OpenAPI JSON: `http://localhost:8000/api/openapi.json`
 
 ### Endpoints
 
 #### Repositories
 
-##### `GET /repos`
+##### `GET /api/repos`
 List all configured repositories.
 
 **Response**: `200 OK`
@@ -83,7 +83,7 @@ List all configured repositories.
 
 #### Worktrees
 
-##### `GET /repos/{repo_id}/worktrees`
+##### `GET /api/repos/{repo_id}/worktrees`
 List all worktrees for a repository.
 
 **Response**: `200 OK`
@@ -110,7 +110,7 @@ List all worktrees for a repository.
 ]
 ```
 
-##### `POST /repos/{repo_id}/worktrees`
+##### `POST /api/repos/{repo_id}/worktrees`
 Create a new worktree.
 
 **Query Parameters**:
@@ -147,7 +147,7 @@ Create a new worktree.
   - Checks out an existing local or remote-tracking branch
   - Fails if branch doesn't exist
 
-##### `DELETE /repos/{repo_id}/worktrees/{name}`
+##### `DELETE /api/repos/{repo_id}/worktrees/{name}`
 Remove a worktree.
 
 **Response**: `200 OK`
@@ -179,7 +179,7 @@ wait for queued/running jobs to finish or cancel them via
 
 **Note**: Jobs are only created through conversations. There is no standalone job creation endpoint. Use `POST /conversations/{id}/turns` to create jobs within a conversation context.
 
-##### `GET /jobs/{job_id}`
+##### `GET /api/jobs/{job_id}`
 Get job metadata.
 
 **Response**: `200 OK`
@@ -206,7 +206,7 @@ Get job metadata.
 - `failed`: Job terminated with error
 - `cancelled`: Job was cancelled via `DELETE /jobs/{job_id}`
 
-##### `DELETE /jobs/{job_id}`
+##### `DELETE /api/jobs/{job_id}`
 Cancel a queued or running job.
 
 For running jobs the runner sends `SIGTERM` to the subprocess, waits up
@@ -225,7 +225,7 @@ subscribe to `/jobs/{id}/events` to observe the terminal transition).
 - `409 Conflict` — job is already terminal (`finished`, `failed`, or
   `cancelled`). Body: `{"detail": "Job already terminal: status=..."}`.
 
-##### `GET /jobs/{job_id}/log`
+##### `GET /api/jobs/{job_id}/log`
 Get full log snapshot (non-streaming).
 
 **Response**: `200 OK`
@@ -255,7 +255,7 @@ Get full log snapshot (non-streaming).
 }
 ```
 
-##### `GET /jobs/{job_id}/events`
+##### `GET /api/jobs/{job_id}/events`
 **Real-time SSE stream** of log lines and status updates.
 
 **Events**:
@@ -279,7 +279,7 @@ Get full log snapshot (non-streaming).
 
 #### Conversations
 
-##### `POST /conversations`
+##### `POST /api/conversations`
 Create a new conversation.
 
 **Request Body**:
@@ -308,7 +308,7 @@ Create a new conversation.
 }
 ```
 
-##### `GET /conversations`
+##### `GET /api/conversations`
 Paginated list of conversations with filtering and sorting.
 
 **Query Parameters**:
@@ -349,12 +349,12 @@ Paginated list of conversations with filtering and sorting.
 }
 ```
 
-##### `GET /conversations/{conversation_id}`
+##### `GET /api/conversations/{conversation_id}`
 Get conversation details.
 
 **Response**: `200 OK` (same as conversation object above)
 
-##### `POST /conversations/{conversation_id}/turns`
+##### `POST /api/conversations/{conversation_id}/turns`
 Add a new turn to an existing conversation.
 
 **Request Body**:
@@ -376,7 +376,7 @@ Add a new turn to an existing conversation.
 - Returns `409 Conflict` if a turn is already in progress
 - The job can be monitored via `GET /jobs/{job_id}/events`
 
-##### `GET /conversations/{conversation_id}/events`
+##### `GET /api/conversations/{conversation_id}/events`
 **Real-time SSE stream** of conversation state changes.
 
 **Events**:
@@ -410,7 +410,7 @@ Add a new turn to an existing conversation.
 
 The `busy` flag indicates whether a turn is currently in progress.
 
-##### `DELETE /conversations/{conversation_id}`
+##### `DELETE /api/conversations/{conversation_id}`
 Soft-archive a conversation. The row is kept so that historical jobs
 can still resolve their `conversation_id`; subsequent `POST .../turns`
 returns `409 Conflict`. Default `GET /conversations` hides archived
@@ -589,7 +589,7 @@ The application uses **Server-Sent Events** for real-time updates. SSE is a one-
 
 ```javascript
 // Connect to SSE endpoint
-const eventSource = new EventSource('/jobs/abc123/events');
+const eventSource = new EventSource("/api/jobs/abc123/events');
 
 // Listen for specific event types
 eventSource.addEventListener('log', (event) => {
@@ -942,7 +942,7 @@ Use OpenAPI generator to create a type-safe API client:
 npm install -D openapi-typescript-codegen
 
 # Generate client from OpenAPI spec
-npx openapi-typescript-codegen --input http://localhost:8000/openapi.json \
+npx openapi-typescript-codegen --input http://localhost:8000/api/openapi.json \
                                 --output ./src/api \
                                 --client fetch
 ```
@@ -1304,7 +1304,7 @@ Currently, the app has **no authentication**. This is acceptable for `localhost`
 // Add auth token to all requests
 const token = localStorage.getItem('auth_token');
 
-fetch('/jobs', {
+fetch('/api/jobs', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${token}`,
@@ -1428,7 +1428,7 @@ const jobLimiter = new RateLimiter(10, 60);
 
 async function createJob(data) {
   await jobLimiter.throttle();
-  return fetch('/jobs', { method: 'POST', body: JSON.stringify(data) });
+  return fetch('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
 }
 ```
 

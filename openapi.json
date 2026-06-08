@@ -6,7 +6,7 @@
     "version": "0.1.0"
   },
   "paths": {
-    "/repos": {
+    "/api/repos": {
       "get": {
         "tags": [
           "repos"
@@ -31,7 +31,7 @@
         }
       }
     },
-    "/repos/{repo_id}/worktrees": {
+    "/api/repos/{repo_id}/worktrees": {
       "get": {
         "tags": [
           "worktrees"
@@ -139,7 +139,7 @@
         }
       }
     },
-    "/repos/{repo_id}/worktrees/{name}": {
+    "/api/repos/{repo_id}/worktrees/{name}": {
       "delete": {
         "tags": [
           "worktrees"
@@ -192,7 +192,7 @@
         }
       }
     },
-    "/jobs": {
+    "/api/jobs": {
       "post": {
         "tags": [
           "jobs"
@@ -370,7 +370,7 @@
         }
       }
     },
-    "/jobs/{job_id}": {
+    "/api/jobs/{job_id}": {
       "get": {
         "tags": [
           "jobs"
@@ -452,7 +452,7 @@
         }
       }
     },
-    "/jobs/{job_id}/log": {
+    "/api/jobs/{job_id}/log": {
       "get": {
         "tags": [
           "jobs"
@@ -494,7 +494,7 @@
         }
       }
     },
-    "/jobs/{job_id}/events": {
+    "/api/jobs/{job_id}/events": {
       "get": {
         "tags": [
           "jobs"
@@ -534,7 +534,7 @@
         }
       }
     },
-    "/conversations": {
+    "/api/conversations": {
       "post": {
         "tags": [
           "conversations"
@@ -706,7 +706,7 @@
         }
       }
     },
-    "/conversations/{conversation_id}": {
+    "/api/conversations/{conversation_id}": {
       "get": {
         "tags": [
           "conversations"
@@ -783,7 +783,7 @@
         }
       }
     },
-    "/conversations/{conversation_id}/turns": {
+    "/api/conversations/{conversation_id}/turns": {
       "post": {
         "tags": [
           "conversations"
@@ -836,7 +836,7 @@
         }
       }
     },
-    "/conversations/{conversation_id}/events": {
+    "/api/conversations/{conversation_id}/events": {
       "get": {
         "tags": [
           "conversations"
