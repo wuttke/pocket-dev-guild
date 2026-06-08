@@ -76,12 +76,22 @@ async def create_worktree(
 @router.delete("/{name}", response_model=WorktreeRemoved, summary="Remove a worktree")
 async def delete_worktree(
     name: Annotated[str, PathParam(pattern=IDENT_PATTERN)],
+    archive_conversations: bool = False,
     repo: Repo = Depends(get_repo),
     store: RepoStore = Depends(get_repo_store),
     git: GitService = Depends(get_git),
     conversations: ConversationStore = Depends(get_conversations),
     jobs: JobStore = Depends(get_store),
 ) -> WorktreeRemoved:
+    # If archive_conversations is True, archive all unarchived conversations
+    # associated with this worktree before checking for active resources.
+    if archive_conversations:
+        unarchived = await conversations.list(
+            repo_id=repo.id, worktree=name, include_archived=False, limit=1000
+        )
+        for conv in unarchived:
+            await conversations.archive(conv.id)
+
     # Guard against silently orphaning bound state. Unarchived
     # conversations would survive as zombies (their session can't be
     # resumed because the cwd is gone); active jobs would die mid-write
