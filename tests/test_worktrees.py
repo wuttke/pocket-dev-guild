@@ -233,3 +233,105 @@ def test_delete_allowed_when_only_finished_jobs_exist(client: TestClient) -> Non
 
     resp = client.delete("/api/repos/demo/worktrees/feature_done")
     assert resp.status_code == 200, resp.text
+
+
+def test_delete_with_archive_conversations_true(client: TestClient) -> None:
+    """Test that archive_conversations=true archives conversations and allows deletion."""
+    # Create a worktree
+    client.post("/api/repos/demo/worktrees", json={"branch": "feature/archive-test"})
+
+    # Create two conversations bound to it
+    conv1 = client.post(
+        "/api/conversations",
+        json={"repo_id": "demo", "worktree": "feature_archive-test", "title": "conv1"},
+    )
+    assert conv1.status_code == 200, conv1.text
+    conv1_id = conv1.json()["id"]
+
+    conv2 = client.post(
+        "/api/conversations",
+        json={"repo_id": "demo", "worktree": "feature_archive-test", "title": "conv2"},
+    )
+    assert conv2.status_code == 200, conv2.text
+    conv2_id = conv2.json()["id"]
+
+    # Verify we have 2 unarchived conversations
+    convs = client.get("/api/conversations?repo_id=demo&worktree=feature_archive-test")
+    assert convs.status_code == 200
+    assert convs.json()["total"] == 2
+
+    # Delete with archive_conversations=true should succeed
+    resp = client.delete("/api/repos/demo/worktrees/feature_archive-test?archive_conversations=true")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"removed": "feature_archive-test"}
+
+    # Verify conversations were archived
+    conv1_check = client.get(f"/api/conversations/{conv1_id}")
+    assert conv1_check.status_code == 200
+    assert conv1_check.json()["archived"] is True
+
+    conv2_check = client.get(f"/api/conversations/{conv2_id}")
+    assert conv2_check.status_code == 200
+    assert conv2_check.json()["archived"] is True
+
+    # Verify unarchived conversation count is 0
+    convs_after = client.get("/api/conversations?repo_id=demo&worktree=feature_archive-test")
+    assert convs_after.status_code == 200
+    assert convs_after.json()["total"] == 0
+
+    # Verify archived conversations are still accessible with include_archived=true
+    convs_archived = client.get(
+        "/api/conversations?repo_id=demo&worktree=feature_archive-test&include_archived=true"
+    )
+    assert convs_archived.status_code == 200
+    assert convs_archived.json()["total"] == 2
+
+
+def test_delete_without_archive_conversations_still_blocks(client: TestClient) -> None:
+    """Test that without archive_conversations parameter, deletion is still blocked."""
+    # Create a worktree
+    client.post("/api/repos/demo/worktrees", json={"branch": "feature/still-blocked"})
+
+    # Create a conversation bound to it
+    conv = client.post(
+        "/api/conversations",
+        json={"repo_id": "demo", "worktree": "feature_still-blocked", "title": "blocker"},
+    )
+    assert conv.status_code == 200, conv.text
+
+    # Delete without archive_conversations should still fail with 409
+    resp = client.delete("/api/repos/demo/worktrees/feature_still-blocked")
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "worktree_has_active_resources"
+    assert detail["conversations"] == 1
+
+
+def test_archive_conversations_with_active_jobs_still_blocks(client: TestClient) -> None:
+    """Test that archive_conversations=true still blocks if there are active jobs."""
+    import asyncio
+
+    client.post("/api/repos/demo/worktrees", json={"branch": "feature/jobs-block"})
+
+    # Create a conversation
+    conv = client.post(
+        "/api/conversations",
+        json={"repo_id": "demo", "worktree": "feature_jobs-block", "title": "x"},
+    )
+    assert conv.status_code == 200, conv.text
+
+    # Seed a queued job directly via the store
+    store = client.app.state.store
+    asyncio.run(
+        store.create(
+            repo_id="demo", worktree="feature_jobs-block", prompt="hi",
+        )
+    )
+
+    # Even with archive_conversations=true, active jobs should block deletion
+    resp = client.delete("/api/repos/demo/worktrees/feature_jobs-block?archive_conversations=true")
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["active_jobs"] == 1
+    # Conversation should have been archived before the check
+    assert detail["conversations"] == 0
