@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from .config import RepoRegistry, Settings
+from .config import Settings
 from .routers import conversations, jobs, repos, worktrees
 from .services.augment_runner import AugmentRunner, SubprocessAugmentRunner
 from .services.conversation_store import ConversationStore
@@ -17,6 +17,7 @@ from .services.git_service import GitService
 from .services.job_store import JobStore
 from .services.mongo_job_store import MongoJobStore
 from .services.notification_hub import NotificationHub
+from .services.repo_store import RepoStore
 from .services.storage_backend import InMemoryBackend, MongoBackend
 
 
@@ -26,6 +27,7 @@ def create_app(
     git: GitService | None = None,
     store: JobStore | None = None,
     conversations_store: ConversationStore | None = None,
+    repo_store: RepoStore | None = None,
     runner: AugmentRunner | None = None,
     static_dir: Path | str | None = "static",
 ) -> FastAPI:
@@ -62,6 +64,10 @@ def create_app(
             backend=backend, notifications=notifications
         )
 
+    if repo_store is None:
+        backend = mongo_backend if mongo_backend else InMemoryBackend()
+        repo_store = RepoStore(backend=backend)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup: ensure MongoDB indexes
@@ -69,6 +75,7 @@ def create_app(
             await mongo_store._ensure_indexes()
         if mongo_backend:
             await conversations_store._ensure_indexes()
+            await repo_store._ensure_indexes()
         # Mark jobs that were mid-flight when we died as failed. Their
         # subprocesses are gone with the previous process; without this,
         # they stay "running" forever and block their conversations.
@@ -94,7 +101,7 @@ def create_app(
     )
 
     app.state.settings = settings
-    app.state.registry = RepoRegistry(settings.config_path)
+    app.state.repo_store = repo_store
     app.state.git = git or GitService()
     app.state.store = store
     app.state.conversations = conversations_store

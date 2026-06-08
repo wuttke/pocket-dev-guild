@@ -9,8 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import RepoRegistry
-from ..deps import get_conversations, get_registry, get_runner, get_store
+from ..deps import get_conversations, get_repo_store, get_runner, get_store
 from ..schemas import (
     IDENT_PATTERN,
     ConversationCreate,
@@ -20,8 +19,10 @@ from ..schemas import (
     JobCreated,
 )
 from ..services.augment_runner import AugmentRunner
+from ..services.augment_runner import AugmentRunner
 from ..services.conversation_store import ConversationStore
 from ..services.job_store import JobStore
+from ..services.repo_store import RepoStore
 from ._pagination import DEFAULT_LIMIT, MAX_LIMIT, parse_sort
 from .jobs import start_job
 
@@ -33,14 +34,14 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 @router.post("", response_model=ConversationInfo, summary="Start a conversation")
 async def create_conversation(
     body: ConversationCreate,
-    registry: RepoRegistry = Depends(get_registry),
+    repo_store: RepoStore = Depends(get_repo_store),
     conversations: ConversationStore = Depends(get_conversations),
 ) -> ConversationInfo:
-    repo = registry.get(body.repo_id)
+    repo = await repo_store.get(body.repo_id)
     if repo is None:
         raise HTTPException(404, f"Repo '{body.repo_id}' not found")
     if body.worktree is not None:
-        target = registry.worktree_path(repo, body.worktree)
+        target = repo_store.worktree_path(repo, body.worktree)
         if not target.exists():
             raise HTTPException(
                 404, f"Worktree '{body.worktree}' not found at {target}"
@@ -129,7 +130,7 @@ async def archive_conversation(
 async def create_turn(
     conversation_id: Annotated[str, Path(min_length=1)],
     body: ConversationTurnCreate,
-    registry: RepoRegistry = Depends(get_registry),
+    repo_store: RepoStore = Depends(get_repo_store),
     store: JobStore = Depends(get_store),
     runner: AugmentRunner = Depends(get_runner),
     conversations: ConversationStore = Depends(get_conversations),
@@ -144,7 +145,7 @@ async def create_turn(
         worktree=conv.worktree,
         prompt=body.prompt,
         conversation_id=conversation_id,
-        registry=registry,
+        repo_store=repo_store,
         store=store,
         runner=runner,
         conversations=conversations,

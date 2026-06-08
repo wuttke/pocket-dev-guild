@@ -18,7 +18,7 @@ uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 
 cp config.example.yaml config.yaml
-$EDITOR config.yaml          # point at your real repos
+$EDITOR config.yaml          # set mongodb_url etc.
 
 .venv/bin/uvicorn main:app --reload
 ```
@@ -34,14 +34,9 @@ Override the config path with `POCKET_DEV_GUILD_CONFIG=/path/to.yaml`.
 agent_binary: auggie
 agent_prompt_param: --print
 
-# Optional. Without this, jobs and conversations live in memory and
-# are lost on restart.
+# Optional. Without this, jobs, conversations, and repositories live
+# in memory and are lost on restart.
 mongodb_url: mongodb://localhost:27017/pocket_dev_guild
-
-repos:
-  - id: example                       # ^[A-Za-z0-9_-]+$ — used in URLs
-    name: example                     # display name
-    path: /absolute/path/to/example
 ```
 
 ## Concepts
@@ -49,8 +44,10 @@ repos:
 ### Repos, worktrees, and the path layout
 
 A **repo** is a registry entry pointing at an existing git clone on
-disk. The service never clones repos itself — `config.yaml` is the
-source of truth.
+disk. Repositories are stored in the database (when MongoDB is configured)
+or in-memory (for development without MongoDB). You can:
+- Register existing repositories via `POST /repos`
+- Clone new repositories via `POST /repos/clone`
 
 **Worktrees** are created next to the repo using a fixed convention so
 they're easy to find and to clean up:
@@ -226,6 +223,7 @@ pocket_dev_guild/
     ├── notification_hub.py     # asyncio.Condition pub/sub for SSE
     ├── job_store.py            # in-memory job store
     ├── mongo_job_store.py      # Mongo-backed job store
+    ├── repo_store.py           # repository registry, in-memory or Mongo
     ├── conversation_store.py   # conversations over a StorageBackend
     ├── storage_backend.py      # InMemoryBackend / MongoBackend
     ├── augment_runner.py       # Protocol + SubprocessAugmentRunner

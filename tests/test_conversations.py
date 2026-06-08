@@ -168,7 +168,7 @@ def test_jobs_endpoint_accepts_conversation_id(app_factory, tmp_config) -> None:
         ).json()
         # Mismatched worktree → 409.
         bad = client.post(
-            "/jobs",
+            "/api/jobs",
             json={
                 "repo_id": "demo",
                 "worktree": None,
@@ -179,7 +179,7 @@ def test_jobs_endpoint_accepts_conversation_id(app_factory, tmp_config) -> None:
         assert bad.status_code == 409, bad.text
         # Correct binding works and the job carries conversation_id.
         ok = client.post(
-            "/jobs",
+            "/api/jobs",
             json={
                 "repo_id": "demo",
                 "worktree": "feature-a",
@@ -194,7 +194,7 @@ def test_jobs_endpoint_accepts_conversation_id(app_factory, tmp_config) -> None:
             conv["id"],
             lambda c: c["turns"] == [job_id] and c["session_id"] is not None,
         )
-        job = client.get(f"/jobs/{job_id}").json()
+        job = client.get(f"/api/jobs/{job_id}").json()
         assert job["conversation_id"] == conv["id"]
         assert job["session_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         assert job["request_id"] == "11111111-2222-3333-4444-555555555555"
