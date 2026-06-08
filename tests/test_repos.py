@@ -7,7 +7,7 @@ from pocket_dev_guild.config import Settings
 
 
 def test_list_repos(client: TestClient) -> None:
-    response = client.get("/repos")
+    response = client.get("/api/repos")
     assert response.status_code == 200
     data = response.json()
     assert data == [
@@ -16,7 +16,7 @@ def test_list_repos(client: TestClient) -> None:
 
 
 def test_openapi_contains_typed_models(client: TestClient) -> None:
-    schema = client.get("/openapi.json").json()
+    schema = client.get("/api/openapi.json").json()
     assert "Repo" in schema["components"]["schemas"]
     assert "JobLog" in schema["components"]["schemas"]
     assert "WorktreeInfo" in schema["components"]["schemas"]

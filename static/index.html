@@ -71,7 +71,7 @@ const log = $("log");
 let source = null;
 
 async function loadRepos() {
-  const r = await fetch("/repos").then(r => r.json());
+  const r = await fetch("/api/repos").then(r => r.json());
   $("repo").innerHTML = r.map(x => `<option value="${x.id}">${x.name}</option>`).join("");
   await loadWorktrees();
 }
@@ -79,7 +79,7 @@ async function loadRepos() {
 async function loadWorktrees() {
   const repoId = $("repo").value;
   if (!repoId) return;
-  const r = await fetch(`/repos/${repoId}/worktrees`).then(r => r.json());
+  const r = await fetch(`/api/repos/${repoId}/worktrees`).then(r => r.json());
   // Primary checkout uses value="" -> sent as worktree: null to the API.
   $("worktree").innerHTML = r
     .map(w => {
@@ -97,7 +97,7 @@ async function createWorktree() {
   const branch = $("new-branch").value.trim();
   if (!branch) return;
   const existing = $("existing-branch").checked;
-  const url = `/repos/${repoId}/worktrees${existing ? "?existing=true" : ""}`;
+  const url = `/api/repos/${repoId}/worktrees${existing ? "?existing=true" : ""}`;
   const res = await fetch(url, {
     method: "POST",
     headers: {"content-type": "application/json"},
@@ -114,7 +114,7 @@ async function deleteWorktree() {
   const name = $("worktree").value;
   if (!name) { alert("Primary checkout kann nicht gelöscht werden."); return; }
   if (!confirm(`Worktree '${name}' wirklich löschen?`)) return;
-  const res = await fetch(`/repos/${repoId}/worktrees/${name}`, {method: "DELETE"});
+  const res = await fetch(`/api/repos/${repoId}/worktrees/${name}`, {method: "DELETE"});
   if (!res.ok) { alert(await res.text()); return; }
   await loadWorktrees();
 }
@@ -126,7 +126,7 @@ async function runAugment() {
   if (!prompt) return;
 
   log.textContent = "";
-  const res = await fetch(`/jobs`, {
+  const res = await fetch(`/api/jobs`, {
     method: "POST",
     headers: {"content-type": "application/json"},
     body: JSON.stringify({repo_id: repoId, worktree: name || null, prompt}),
@@ -137,7 +137,7 @@ async function runAugment() {
   log.textContent = `--- Job ${job_id} started ${new Date(startedAt).toISOString()} ---\n`;
 
   if (source) source.close();
-  source = new EventSource(`/jobs/${job_id}/events`);
+  source = new EventSource(`/api/jobs/${job_id}/events`);
   source.addEventListener("log", (event) => {
     const entry = JSON.parse(event.data);
     log.textContent += `[${entry.stream}] ${entry.line}`;
@@ -171,7 +171,7 @@ let conversationSource = null;
 function openConversationStream(conversationId) {
   if (conversationSource) conversationSource.close();
   if (!conversationId) { renderConversationInfo(null, false); return; }
-  conversationSource = new EventSource(`/conversations/${conversationId}/events`);
+  conversationSource = new EventSource(`/api/conversations/${conversationId}/events`);
   const onPayload = (event) => {
     const data = JSON.parse(event.data);
     renderConversationInfo(data.conversation, data.busy);
@@ -184,7 +184,7 @@ function openConversationStream(conversationId) {
 async function loadConversations(preferId) {
   const repoId = $("repo").value;
   if (!repoId) return;
-  const resp = await fetch(`/conversations?repo_id=${repoId}`).then(r => r.json());
+  const resp = await fetch(`/api/conversations?repo_id=${repoId}`).then(r => r.json());
   const r = resp.items || [];
   $("conversation").innerHTML = [
     `<option value="">— keine —</option>`,
@@ -204,7 +204,7 @@ async function archiveConversation() {
   const conversationId = $("conversation").value;
   if (!conversationId) { alert("Keine Conversation gewählt."); return; }
   if (!confirm("Conversation wirklich archivieren?")) return;
-  const res = await fetch(`/conversations/${conversationId}`, {method: "DELETE"});
+  const res = await fetch(`/api/conversations/${conversationId}`, {method: "DELETE"});
   if (!res.ok && res.status !== 204) { alert(await res.text()); return; }
   await loadConversations();
 }
@@ -213,7 +213,7 @@ async function newConversation() {
   const repoId = $("repo").value;
   const worktree = $("worktree").value || null;
   const title = $("conversation-title").value.trim() || null;
-  const res = await fetch(`/conversations`, {
+  const res = await fetch(`/api/conversations`, {
     method: "POST",
     headers: {"content-type": "application/json"},
     body: JSON.stringify({repo_id: repoId, worktree, title}),
@@ -229,7 +229,7 @@ async function sendTurn() {
   if (!conversationId) { alert("Keine Conversation gewählt."); return; }
   const prompt = $("prompt").value;
   if (!prompt) return;
-  const res = await fetch(`/conversations/${conversationId}/turns`, {
+  const res = await fetch(`/api/conversations/${conversationId}/turns`, {
     method: "POST",
     headers: {"content-type": "application/json"},
     body: JSON.stringify({prompt}),
@@ -239,7 +239,7 @@ async function sendTurn() {
   const startedAt = Date.now();
   log.textContent = `--- Turn ${job_id} started ${new Date(startedAt).toISOString()} ---\n`;
   if (source) source.close();
-  source = new EventSource(`/jobs/${job_id}/events`);
+  source = new EventSource(`/api/jobs/${job_id}/events`);
   source.addEventListener("log", (event) => {
     const entry = JSON.parse(event.data);
     log.textContent += `[${entry.stream}] ${entry.line}`;

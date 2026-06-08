@@ -6,9 +6,10 @@ browser via Server-Sent Events; conversation context is preserved
 across turns by resuming the agent's own session.
 
 > **API reference**: the running server publishes a typed OpenAPI 3
-> document. Browse it at <http://localhost:8000/docs> (Swagger) or
-> <http://localhost:8000/redoc>. The committed `openapi.json` is the
-> same document for offline tooling.
+> document. Browse it at <http://localhost:8000/api/docs> (Swagger) or
+> <http://localhost:8000/api/redoc>. The committed `openapi.json` is the
+> same document for offline tooling. All API endpoints are available under
+> the `/api` prefix, while the frontend is served from `/`.
 
 ## Quickstart
 
@@ -69,7 +70,7 @@ they arrive. Each job has a lifecycle:
 ```
 queued ──► running ──► finished      (exit 0)
                   ╲──► failed        (non-zero exit or spawn error)
-                  ╲──► cancelled     (DELETE /jobs/{id})
+                  ╲──► cancelled     (DELETE /api/jobs/{id})
 ```
 
 Cancellation sends `SIGTERM` to the subprocess, waits 5 s, then
@@ -103,9 +104,9 @@ default listing and reject new turns, but the rows stay so existing
 
 Two endpoints stream Server-Sent Events:
 
-- `GET /jobs/{id}/events` — `log` events (stdout/stderr lines), then
+- `GET /api/jobs/{id}/events` — `log` events (stdout/stderr lines), then
   one final `status` event when the job reaches a terminal state.
-- `GET /conversations/{id}/events` — state changes on the conversation
+- `GET /api/conversations/{id}/events` — state changes on the conversation
   itself (new turn started, summary updated, archived).
 
 The push side is a `NotificationHub`: an in-memory map of
@@ -133,7 +134,7 @@ behaviour — the hook is gated for the multi-instance future.)
 
 ### Referential integrity
 
-`DELETE /repos/{id}/worktrees/{name}` refuses to remove a worktree
+`DELETE /api/repos/{id}/worktrees/{name}` refuses to remove a worktree
 while it has unarchived conversations or active (queued/running) jobs.
 It returns `409 Conflict` with a structured body so the UI can prompt
 the user to archive conversations or cancel jobs first:
@@ -153,14 +154,14 @@ the user to archive conversations or cancel jobs first:
 ### Starting a conversation and its first turn
 
 ```
-POST /conversations            { repo_id, worktree, title? }
+POST /api/conversations            { repo_id, worktree, title? }
   └─► ConversationStore.create → ConversationInfo (busy=false, turns=[])
 
-POST /conversations/{id}/turns { prompt }
+POST /api/conversations/{id}/turns { prompt }
   ├─► mark conversation busy
   ├─► JobStore.create (status=queued, conversation_id=…)
   ├─► schedule run_conversation_turn as asyncio.Task
-  └─► return JobCreated (job_id, location: /jobs/{id}/events)
+  └─► return JobCreated (job_id, location: /api/jobs/{id}/events)
 
   ── background ──
   runner.run(job_id, cwd, prompt)
@@ -181,7 +182,7 @@ one terminal `status` event when the runner exits.
 
 ### Resuming on the second turn
 
-`POST /conversations/{id}/turns` looks up the stored `session_id` and
+`POST /api/conversations/{id}/turns` looks up the stored `session_id` and
 passes it to `runner.run(..., session_id=…)`, which appends
 `--resume <id>` to the `auggie` invocation. No state on the
 service side needs to be re-sent; the agent reloads its own session.
@@ -189,7 +190,7 @@ service side needs to be re-sent; the agent reloads its own session.
 ### Cancelling a running job
 
 ```
-DELETE /jobs/{id}
+DELETE /api/jobs/{id}
   ├─► 404 if unknown
   ├─► 409 if already finished/failed/cancelled
   └─► runner.cancel(id):

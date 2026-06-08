@@ -5,20 +5,20 @@ from pocket_dev_guild.schemas import WorktreeInfo
 
 def test_create_list_delete_worktree(client: TestClient) -> None:
     create = client.post(
-        "/repos/demo/worktrees",
+        "/api/repos/demo/worktrees",
         json={"branch": "feature/persistence"},
     )
     assert create.status_code == 200, create.text
     assert create.json()["name"] == "feature_persistence"
 
-    listed = client.get("/repos/demo/worktrees")
+    listed = client.get("/api/repos/demo/worktrees")
     assert listed.status_code == 200
     items = listed.json()
     by_name = {w["name"]: w for w in items}
     assert "feature_persistence" in by_name
     assert by_name["feature_persistence"]["is_primary"] is False
 
-    delete = client.delete("/repos/demo/worktrees/feature_persistence")
+    delete = client.delete("/api/repos/demo/worktrees/feature_persistence")
     assert delete.status_code == 200
     assert delete.json() == {"removed": "feature_persistence"}
 
@@ -33,7 +33,7 @@ def test_create_passes_branch_and_start_point_to_git(
     app = app_factory(git=git)
     with TestClient(app) as client:
         resp = client.post(
-            "/repos/demo/worktrees",
+            "/api/repos/demo/worktrees",
             json={"branch": "bugfix/issue-42"},
         )
     assert resp.status_code == 200, resp.text
@@ -55,14 +55,14 @@ def test_list_marks_primary_and_hides_foreign(app_factory, tmp_config) -> None:
     ]
     app = app_factory(git=git)
     with TestClient(app) as client:
-        items = client.get("/repos/demo/worktrees").json()
+        items = client.get("/api/repos/demo/worktrees").json()
     assert len(items) == 1
     assert items[0]["is_primary"] is True
     assert items[0]["name"] is None
 
 
 def test_unknown_repo_returns_404(client: TestClient) -> None:
-    response = client.get("/repos/nope/worktrees")
+    response = client.get("/api/repos/nope/worktrees")
     assert response.status_code == 404
 
 
@@ -72,7 +72,7 @@ def test_rejects_invalid_repo_id_in_path(client: TestClient) -> None:
     # responds 405 to a GET. That's still a rejection of the worktrees
     # handler — accept it alongside 404 / 422.
     for repo_id in ("..", ".", "demo/..", "with space", ""):
-        response = client.get(f"/repos/{repo_id}/worktrees")
+        response = client.get(f"/api/repos/{repo_id}/worktrees")
         assert response.status_code in (404, 405, 422), (repo_id, response.text)
 
 
@@ -90,14 +90,14 @@ def test_rejects_invalid_branch_pattern_on_create(client: TestClient) -> None:
         "feature1/foo",        # digit in kind
     ):
         response = client.post(
-            "/repos/demo/worktrees", json={"branch": branch}
+            "/api/repos/demo/worktrees", json={"branch": branch}
         )
         assert response.status_code == 422, (branch, response.text)
 
 
 def test_accepts_nested_branch_segments(client: TestClient) -> None:
     resp = client.post(
-        "/repos/demo/worktrees",
+        "/api/repos/demo/worktrees",
         json={"branch": "feature/team/foo-bar"},
     )
     assert resp.status_code == 200, resp.text
@@ -108,7 +108,7 @@ def test_dirname_is_lowercased_and_dots_replaced(client: TestClient) -> None:
     # Uppercase and dots are allowed in the branch name but normalised
     # away in the worktree directory name.
     resp = client.post(
-        "/repos/demo/worktrees",
+        "/api/repos/demo/worktrees",
         json={"branch": "release/2.5.x"},
     )
     assert resp.status_code == 200, resp.text
@@ -128,12 +128,12 @@ def test_uppercase_branch_collides_with_lowercase_dirname(
     app = app_factory(git=git)
     with TestClient(app) as client:
         first = client.post(
-            "/repos/demo/worktrees", json={"branch": "feature/foo"}
+            "/api/repos/demo/worktrees", json={"branch": "feature/foo"}
         )
         assert first.status_code == 200, first.text
         assert first.json()["name"] == "feature_foo"
         second = client.post(
-            "/repos/demo/worktrees", json={"branch": "Feature/Foo"}
+            "/api/repos/demo/worktrees", json={"branch": "Feature/Foo"}
         )
     # FakeGit doesn't simulate git's "target already exists" failure,
     # so we at minimum check the derived dirname matches the first.
@@ -150,7 +150,7 @@ def test_create_existing_branch_skips_start_point(
     app = app_factory(git=git)
     with TestClient(app) as client:
         resp = client.post(
-            "/repos/demo/worktrees?existing=true",
+            "/api/repos/demo/worktrees?existing=true",
             json={"branch": "feature/already-there"},
         )
     assert resp.status_code == 200, resp.text
@@ -166,21 +166,21 @@ def test_rejects_invalid_worktree_name_on_delete(client: TestClient) -> None:
     # "." and ".." get normalised away by the HTTP client before they reach
     # the server, so we only assert on names that survive URL normalisation.
     for name in ("with%20space", "a%2Eb%2Ec", "a%3Bb"):
-        response = client.delete(f"/repos/demo/worktrees/{name}")
+        response = client.delete(f"/api/repos/demo/worktrees/{name}")
         assert response.status_code == 422, (name, response.text)
 
 
 def test_delete_blocked_by_unarchived_conversation(client: TestClient) -> None:
     # Create a worktree, then a conversation bound to it: delete must 409.
-    client.post("/repos/demo/worktrees", json={"branch": "feature/blocker"})
+    client.post("/api/repos/demo/worktrees", json={"branch": "feature/blocker"})
     conv = client.post(
-        "/conversations",
+        "/api/conversations",
         json={"repo_id": "demo", "worktree": "feature_blocker", "title": "x"},
     )
     assert conv.status_code == 200, conv.text
     conv_id = conv.json()["id"]
 
-    resp = client.delete("/repos/demo/worktrees/feature_blocker")
+    resp = client.delete("/api/repos/demo/worktrees/feature_blocker")
     assert resp.status_code == 409, resp.text
     detail = resp.json()["detail"]
     assert detail["reason"] == "worktree_has_active_resources"
@@ -188,17 +188,17 @@ def test_delete_blocked_by_unarchived_conversation(client: TestClient) -> None:
     assert detail["active_jobs"] == 0
 
     # After archiving the conversation, deletion proceeds.
-    archived = client.delete(f"/conversations/{conv_id}")
+    archived = client.delete(f"/api/conversations/{conv_id}")
     assert archived.status_code == 204, archived.text
 
-    resp = client.delete("/repos/demo/worktrees/feature_blocker")
+    resp = client.delete("/api/repos/demo/worktrees/feature_blocker")
     assert resp.status_code == 200, resp.text
 
 
 def test_delete_blocked_by_active_job(client: TestClient) -> None:
     import asyncio
 
-    client.post("/repos/demo/worktrees", json={"branch": "feature/busy"})
+    client.post("/api/repos/demo/worktrees", json={"branch": "feature/busy"})
 
     # Seed a queued job directly via the store; no runner needed for
     # the count-based guard.
@@ -209,7 +209,7 @@ def test_delete_blocked_by_active_job(client: TestClient) -> None:
         )
     )
 
-    resp = client.delete("/repos/demo/worktrees/feature_busy")
+    resp = client.delete("/api/repos/demo/worktrees/feature_busy")
     assert resp.status_code == 409, resp.text
     detail = resp.json()["detail"]
     assert detail["active_jobs"] == 1
@@ -219,7 +219,7 @@ def test_delete_blocked_by_active_job(client: TestClient) -> None:
 def test_delete_allowed_when_only_finished_jobs_exist(client: TestClient) -> None:
     import asyncio
 
-    client.post("/repos/demo/worktrees", json={"branch": "feature/done"})
+    client.post("/api/repos/demo/worktrees", json={"branch": "feature/done"})
 
     store = client.app.state.store
 
@@ -231,5 +231,5 @@ def test_delete_allowed_when_only_finished_jobs_exist(client: TestClient) -> Non
 
     asyncio.run(_seed_finished())
 
-    resp = client.delete("/repos/demo/worktrees/feature_done")
+    resp = client.delete("/api/repos/demo/worktrees/feature_done")
     assert resp.status_code == 200, resp.text
