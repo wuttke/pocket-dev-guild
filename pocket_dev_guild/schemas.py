@@ -152,6 +152,10 @@ class ConversationTurnCreate(BaseModel):
     prompt: str
 
 
+class ConversationUpdate(BaseModel):
+    title: str | None = None
+
+
 class JobListResponse(BaseModel):
     """Paginated job listing.
 

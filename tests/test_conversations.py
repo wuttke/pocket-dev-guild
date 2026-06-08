@@ -463,3 +463,108 @@ def test_list_conversations_updated_since_query(
         client.get("/api/conversations?updated_since=not-a-date").status_code
         == 422
     )
+
+
+def test_update_conversation_title(client: TestClient, tmp_config) -> None:
+    """PUT /api/conversations/{id} updates the conversation title."""
+    _ensure_worktree(tmp_config)
+
+    # Create a conversation
+    create_resp = client.post(
+        "/api/conversations",
+        json={"repo_id": "demo", "worktree": "feature-a", "title": "Original Title"},
+    )
+    assert create_resp.status_code == 200
+    conv = create_resp.json()
+    conv_id = conv["id"]
+    assert conv["title"] == "Original Title"
+
+    # Update the title
+    update_resp = client.put(
+        f"/api/conversations/{conv_id}",
+        json={"title": "Updated Title"},
+    )
+    assert update_resp.status_code == 200
+    updated = update_resp.json()
+    assert updated["id"] == conv_id
+    assert updated["title"] == "Updated Title"
+    assert updated["repo_id"] == "demo"
+    assert updated["worktree"] == "feature-a"
+
+    # Verify the update persisted
+    get_resp = client.get(f"/api/conversations/{conv_id}")
+    assert get_resp.status_code == 200
+    fetched = get_resp.json()
+    assert fetched["title"] == "Updated Title"
+
+
+def test_update_conversation_with_null_preserves_existing(
+    client: TestClient, tmp_config
+) -> None:
+    """PUT with title=null does not change the existing title.
+
+    The patch method only updates non-None values, so sending null
+    is equivalent to not sending the field at all.
+    """
+    _ensure_worktree(tmp_config)
+
+    # Create a conversation with a title
+    create_resp = client.post(
+        "/api/conversations",
+        json={"repo_id": "demo", "worktree": "feature-a", "title": "Initial Title"},
+    )
+    assert create_resp.status_code == 200
+    conv_id = create_resp.json()["id"]
+
+    # Send null - should not change the title
+    update_resp = client.put(
+        f"/api/conversations/{conv_id}",
+        json={"title": None},
+    )
+    assert update_resp.status_code == 200
+    updated = update_resp.json()
+    assert updated["title"] == "Initial Title"  # Should remain unchanged
+
+    # Verify the title is still there
+    get_resp = client.get(f"/api/conversations/{conv_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["title"] == "Initial Title"
+
+
+def test_update_conversation_not_found(client: TestClient) -> None:
+    """PUT returns 404 for non-existent conversation."""
+    resp = client.put(
+        "/api/conversations/does-not-exist",
+        json={"title": "New Title"},
+    )
+    assert resp.status_code == 404
+
+
+def test_update_conversation_updates_timestamp(client: TestClient, tmp_config) -> None:
+    """PUT updates the updated_at timestamp."""
+    _ensure_worktree(tmp_config)
+
+    # Create a conversation
+    create_resp = client.post(
+        "/api/conversations",
+        json={"repo_id": "demo", "worktree": "feature-a", "title": "Original"},
+    )
+    assert create_resp.status_code == 200
+    conv = create_resp.json()
+    conv_id = conv["id"]
+    original_updated_at = conv["updated_at"]
+
+    # Wait a bit to ensure timestamp difference
+    time.sleep(0.05)
+
+    # Update the title
+    update_resp = client.put(
+        f"/api/conversations/{conv_id}",
+        json={"title": "Updated"},
+    )
+    assert update_resp.status_code == 200
+    updated = update_resp.json()
+
+    # Verify updated_at changed
+    assert updated["updated_at"] != original_updated_at
+    assert updated["updated_at"] > original_updated_at

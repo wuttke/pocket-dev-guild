@@ -247,6 +247,7 @@ class ConversationStore:
         *,
         session_id: str | None = None,
         summary: str | None = None,
+        title: str | None = None,
     ) -> None:
         """Update mutable fields. Only non-None values overwrite."""
         try:
@@ -255,6 +256,8 @@ class ConversationStore:
                 update["session_id"] = session_id
             if summary is not None:
                 update["summary"] = summary
+            if title is not None:
+                update["title"] = title
 
             await self._backend.update("conversations", conv_id, update)
             await self._notifications.notify(f"conversation:{conv_id}")
