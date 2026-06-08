@@ -209,11 +209,12 @@ updates from the instance that owns the live subprocess. See
 
 ### Persistence: in-memory vs. MongoDB
 
-`JobStore` and `ConversationStore` are pluggable. Without
+`JobStore`, `ConversationStore`, and `RepoStore` are pluggable. Without
 `mongodb_url` in config they're plain dicts in memory — fine for
 local development, lost on restart. Set `mongodb_url` and the same
-APIs are served by `MongoJobStore` and `ConversationStore(backend=
-MongoBackend(...))` against the configured database.
+APIs are served by `MongoJobStore`, `ConversationStore(backend=
+MongoBackend(...))`, and `RepoStore(backend=MongoBackend(...))` against
+the configured database.
 
 On startup with Mongo enabled, the lifespan hook runs `fail_orphans`:
 any job left `running` by a previous process is flipped to `failed`,
@@ -346,7 +347,6 @@ integration tests that run against a local MongoDB if reachable.
 
 ## Roadmap
 
-See `TODO.md` for the prioritised list. The headline open items are
-**auth** (currently anyone who can reach `/jobs` runs the agent),
-**multi-agent support** (the runner is hard-wired to `augment`), and
-the **frontend rewrite** to a real Vite/React/Shadcn app.
+The headline open items are **auth** (currently anyone who can reach
+`/jobs` runs the agent) and **multi-agent support** (the runner is
+hard-wired to `augment`). See `TODO.md` for additional planned features.

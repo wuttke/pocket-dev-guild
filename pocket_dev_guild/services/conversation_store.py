@@ -9,10 +9,15 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from ..schemas import ConversationInfo
 from .notification_hub import NotificationHub
 from .storage_backend import InMemoryBackend, StorageBackend
+
+if TYPE_CHECKING:
+    from .job_store import JobStore
+    from .mongo_job_store import MongoJobStore
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +134,52 @@ class ConversationStore:
             offset=offset,
         )
         return [ConversationInfo(**doc) for doc in docs]
+
+    async def list_with_turn_status(
+        self,
+        job_store: JobStore | MongoJobStore,
+        repo_id: str | None = None,
+        *,
+        worktree: str | None = None,
+        include_archived: bool = False,
+        updated_since: datetime | None = None,
+        sort: list[tuple[str, int]] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ConversationInfo]:
+        """List conversations with last_turn_status populated.
+
+        Fetches job statuses for the last turn of each conversation in a
+        single batched query for efficiency.
+        """
+        convs = await self.list(
+            repo_id=repo_id,
+            worktree=worktree,
+            include_archived=include_archived,
+            updated_since=updated_since,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+
+        # Extract last job IDs (if any)
+        job_ids = [c.turns[-1] for c in convs if c.turns]
+
+        if not job_ids:
+            return convs
+
+        # Batch fetch job statuses
+        jobs = await job_store.get_many(job_ids)
+        job_status_map = {j.id: j.status for j in jobs}
+
+        # Populate last_turn_status
+        enriched = []
+        for conv in convs:
+            last_job_id = conv.turns[-1] if conv.turns else None
+            last_status = job_status_map.get(last_job_id) if last_job_id else None
+            enriched.append(conv.model_copy(update={"last_turn_status": last_status}))
+
+        return enriched
 
     async def count(
         self,

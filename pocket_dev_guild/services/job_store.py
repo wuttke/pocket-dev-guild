@@ -49,6 +49,12 @@ class JobStore:
         record = self._jobs.get(job_id)
         return record.info if record else None
 
+    async def get_many(self, job_ids: list[str]) -> list[JobInfo]:
+        """Batch retrieve jobs by ID. Missing jobs are omitted from result."""
+        return [
+            self._jobs[jid].info for jid in job_ids if jid in self._jobs
+        ]
+
     async def list(
         self,
         *,

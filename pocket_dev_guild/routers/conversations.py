@@ -68,13 +68,15 @@ async def list_conversations(
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     offset: Annotated[int, Query(ge=0)] = 0,
     conversations: ConversationStore = Depends(get_conversations),
+    jobs: JobStore = Depends(get_store),
 ) -> ConversationListResponse:
     sort_spec = parse_sort(
         sort,
         allowed=_CONVERSATION_SORT_FIELDS,
         default=[("updated_at", -1)],
     )
-    items = await conversations.list(
+    items = await conversations.list_with_turn_status(
+        job_store=jobs,
         repo_id=repo_id,
         worktree=worktree,
         include_archived=include_archived,

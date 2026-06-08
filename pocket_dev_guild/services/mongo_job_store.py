@@ -75,6 +75,16 @@ class MongoJobStore:
             logger.error(f"Failed to get job {job_id}: {e}")
             return None
 
+    async def get_many(self, job_ids: list[str]) -> list[JobInfo]:
+        """Batch retrieve jobs by ID. Missing jobs are omitted from result."""
+        try:
+            cursor = self._jobs.find({"id": {"$in": job_ids}}, {"_id": 0})
+            docs = await cursor.to_list(None)
+            return [JobInfo(**_attach_utc(doc)) for doc in docs]
+        except Exception as e:
+            logger.error(f"Failed to batch get jobs: {e}")
+            return []
+
     def _build_filter(
         self,
         *,
