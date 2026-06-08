@@ -13,6 +13,51 @@ across turns by resuming the agent's own session.
 
 ## Quickstart
 
+### Option 1: Docker Compose (Recommended for Production)
+
+The easiest way to get started with MongoDB included (requires Docker Compose):
+
+```bash
+# Start everything (backend + MongoDB)
+docker compose up -d
+
+# View logs
+docker compose logs -f backend
+
+# Stop everything
+docker compose down
+```
+
+Then open <http://localhost:8000/> for the minimal built-in UI.
+
+To mount your repositories directory, edit `docker-compose.yml` and uncomment the volumes section under the `backend` service.
+
+### Option 2: Docker (Manual)
+
+```bash
+# Build the image
+docker build -t pocket-dev-guild-backend .
+
+# Run with in-memory storage (data lost on restart)
+docker run -p 8000:8000 pocket-dev-guild-backend
+
+# Run with MongoDB via environment variable
+docker run -p 8000:8000 \
+  -e MONGODB_URL=mongodb://host.docker.internal:27017/pocket_dev_guild \
+  pocket-dev-guild-backend
+
+# Run with custom config file and repository access
+docker run -p 8000:8000 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  -v /path/to/repos:/repos \
+  -e MONGODB_URL=mongodb://host.docker.internal:27017/pocket_dev_guild \
+  pocket-dev-guild-backend
+```
+
+Then open <http://localhost:8000/> for the minimal built-in UI.
+
+### Option 3: Local Development
+
 ```bash
 uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
@@ -27,7 +72,19 @@ Then open <http://localhost:8000/> for the minimal built-in UI.
 
 Override the config path with `POCKET_DEV_GUILD_CONFIG=/path/to.yaml`.
 
-## Configuration (`config.yaml`)
+## Configuration
+
+### Environment Variables
+
+The following environment variables can be used to configure the application:
+
+- **`MONGODB_URL`**: MongoDB connection string (e.g., `mongodb://localhost:27017/pocket_dev_guild`)
+  - Takes precedence over `config.yaml` if set
+  - Without this, data is stored in-memory and lost on restart
+  - When using Docker, use `host.docker.internal` to connect to MongoDB on the host machine
+- **`POCKET_DEV_GUILD_CONFIG`**: Path to custom config file (default: `config.yaml`)
+
+### Configuration File (`config.yaml`)
 
 ```yaml
 # Which agent to invoke and how it takes its prompt. Defaults shown.
@@ -36,7 +93,38 @@ agent_prompt_param: --print
 
 # Optional. Without this, jobs, conversations, and repositories live
 # in memory and are lost on restart.
+# Note: MONGODB_URL environment variable takes precedence if set.
 mongodb_url: mongodb://localhost:27017/pocket_dev_guild
+```
+
+### Docker Configuration Examples
+
+**Using environment variables only:**
+```bash
+docker run -p 8000:8000 \
+  -e MONGODB_URL=mongodb://user:pass@mongo.example.com:27017/pocket_dev_guild \
+  pocket-dev-guild-backend
+```
+
+**Using a config file:**
+```bash
+# Create your config.yaml with desired settings
+docker run -p 8000:8000 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  pocket-dev-guild-backend
+```
+
+**Accessing host MongoDB from Docker:**
+```bash
+# On Linux/Mac, use host.docker.internal
+docker run -p 8000:8000 \
+  -e MONGODB_URL=mongodb://host.docker.internal:27017/pocket_dev_guild \
+  pocket-dev-guild-backend
+
+# Or use --network host (Linux only)
+docker run --network host \
+  -e MONGODB_URL=mongodb://localhost:27017/pocket_dev_guild \
+  pocket-dev-guild-backend
 ```
 
 ## Concepts

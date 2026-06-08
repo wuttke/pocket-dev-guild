@@ -27,4 +27,10 @@ class Settings:
             data = yaml.safe_load(self.config_path.read_text()) or {}
         self.agent_binary: str = data.get("agent_binary", "auggie")
         self.agent_prompt_param: str = data.get("agent_prompt_param", "--print")
-        self.mongodb_url: str | None = data.get("mongodb_url") or None
+        # MongoDB URL can be set via environment variable or config file
+        # Environment variable takes precedence
+        self.mongodb_url: str | None = (
+            os.environ.get("MONGODB_URL")
+            or data.get("mongodb_url")
+            or None
+        )
