@@ -17,7 +17,7 @@ uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 
 cp config.example.yaml config.yaml
-$EDITOR config.yaml          # point at your real repos
+$EDITOR config.yaml          # set mongodb_url etc.
 
 .venv/bin/uvicorn main:app --reload
 ```
@@ -33,15 +33,10 @@ Override the config path with `POCKET_DEV_GUILD_CONFIG=/path/to.yaml`.
 agent_binary: auggie
 agent_prompt_param: --print
 
-# Optional. Without this, jobs and conversations live in memory and
-# are lost on restart. When specified, repositories are also persisted
-# to the database instead of config.yaml.
+# Optional. Without this, jobs, conversations, and repositories live
+# in memory and are lost on restart.
 mongodb_url: mongodb://localhost:27017/pocket_dev_guild
 ```
-
-**Note:** As of the latest version, repositories are stored in the database
-when `mongodb_url` is configured, or in-memory otherwise. The `repos` section
-in `config.yaml` is deprecated. See "Migrating Repositories" below.
 
 ## Concepts
 
@@ -136,43 +131,6 @@ any job left `running` by a previous process is flipped to `failed`,
 because its subprocess died with that process. (This is single-node
 behaviour — the hook is gated for the multi-instance future.)
 
-### Migrating Repositories from config.yaml to Database
-
-**For existing deployments:** If you have repositories defined in `config.yaml`
-and want to migrate to the database-backed system:
-
-1. **Start with MongoDB configured:**
-   ```yaml
-   mongodb_url: mongodb://localhost:27017/pocket_dev_guild
-   ```
-
-2. **Register each repository via the API:**
-   ```bash
-   # For each repository in your old config.yaml:
-   curl -X POST http://localhost:8000/repos \
-     -H "Content-Type: application/json" \
-     -d '{
-       "id": "example",
-       "name": "example",
-       "path": "/absolute/path/to/example"
-     }'
-   ```
-
-3. **Verify the migration:**
-   ```bash
-   curl http://localhost:8000/repos
-   ```
-
-4. **Remove the `repos` section from config.yaml:**
-   The repos section is no longer read when repositories are in the database.
-
-**For new deployments:** Simply use the API endpoints:
-- `POST /repos` - Register an existing repository on disk
-- `POST /repos/clone` - Clone a repository from a URL
-
-**Without MongoDB:** Repositories are stored in-memory and must be
-re-registered on each restart via the API or a startup script.
-
 ### Referential integrity
 
 `DELETE /repos/{id}/worktrees/{name}` refuses to remove a worktree
@@ -264,6 +222,7 @@ pocket_dev_guild/
     ├── notification_hub.py     # asyncio.Condition pub/sub for SSE
     ├── job_store.py            # in-memory job store
     ├── mongo_job_store.py      # Mongo-backed job store
+    ├── repo_store.py           # repository registry, in-memory or Mongo
     ├── conversation_store.py   # conversations over a StorageBackend
     ├── storage_backend.py      # InMemoryBackend / MongoBackend
     ├── augment_runner.py       # Protocol + SubprocessAugmentRunner
