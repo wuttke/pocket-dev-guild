@@ -24,6 +24,25 @@ class Repo(BaseModel):
     id: str = Field(pattern=IDENT_PATTERN)
     name: str
     path: str
+    # Inactive repos are hidden from listings and reject operations.
+    # The record is preserved so existing jobs/conversations can still
+    # resolve their repo_id, but the repo is effectively soft-deleted.
+    inactive: bool = False
+
+
+class RepoCreate(BaseModel):
+    """Request model for creating/registering an existing repository."""
+    id: str = Field(pattern=IDENT_PATTERN)
+    name: str
+    path: str
+
+
+class RepoClone(BaseModel):
+    """Request model for cloning a repository from a URL."""
+    url: str
+    parent_path: str
+    id: str | None = Field(default=None, pattern=IDENT_PATTERN)
+    name: str | None = None
 
 
 class WorktreeInfo(BaseModel):

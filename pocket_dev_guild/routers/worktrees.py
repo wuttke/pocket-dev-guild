@@ -8,8 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Path as PathParam
 
-from ..config import RepoRegistry
-from ..deps import get_conversations, get_git, get_registry, get_repo, get_store
+from ..deps import get_conversations, get_git, get_repo, get_repo_store, get_store
 from ..schemas import (
     IDENT_PATTERN,
     Repo,
@@ -21,6 +20,7 @@ from ..schemas import (
 from ..services.conversation_store import ConversationStore
 from ..services.git_service import GitError, GitService
 from ..services.job_store import JobStore
+from ..services.repo_store import RepoStore
 
 router = APIRouter(prefix="/repos/{repo_id}/worktrees", tags=["worktrees"])
 
@@ -28,14 +28,14 @@ router = APIRouter(prefix="/repos/{repo_id}/worktrees", tags=["worktrees"])
 @router.get("", response_model=list[WorktreeInfo], summary="List worktrees")
 async def list_worktrees(
     repo: Repo = Depends(get_repo),
-    registry: RepoRegistry = Depends(get_registry),
+    store: RepoStore = Depends(get_repo_store),
     git: GitService = Depends(get_git),
 ) -> list[WorktreeInfo]:
     try:
         raw = await git.list_worktrees(Path(repo.path))
     except GitError as exc:
         raise HTTPException(500, str(exc))
-    return registry.classify_worktrees(repo, raw)
+    return store.classify_worktrees(repo, raw)
 
 
 @router.post("", response_model=WorktreeCreated, summary="Create a worktree")
@@ -43,7 +43,7 @@ async def create_worktree(
     body: WorktreeCreate,
     existing: bool = False,
     repo: Repo = Depends(get_repo),
-    registry: RepoRegistry = Depends(get_registry),
+    store: RepoStore = Depends(get_repo_store),
     git: GitService = Depends(get_git),
 ) -> WorktreeCreated:
     # Worktree directory mirrors the branch, lower-cased with `/` and
@@ -52,7 +52,7 @@ async def create_worktree(
     # on the filesystem, so we never end up with two case-only-distinct
     # worktrees.
     name = body.branch.lower().replace("/", "_").replace(".", "_")
-    target = registry.worktree_path(repo, name)
+    target = store.worktree_path(repo, name)
     try:
         if existing:
             # Check out an existing branch (local or remote tracking).
@@ -77,7 +77,7 @@ async def create_worktree(
 async def delete_worktree(
     name: Annotated[str, PathParam(pattern=IDENT_PATTERN)],
     repo: Repo = Depends(get_repo),
-    registry: RepoRegistry = Depends(get_registry),
+    store: RepoStore = Depends(get_repo_store),
     git: GitService = Depends(get_git),
     conversations: ConversationStore = Depends(get_conversations),
     jobs: JobStore = Depends(get_store),
@@ -109,7 +109,7 @@ async def delete_worktree(
             },
         )
 
-    target = registry.worktree_path(repo, name)
+    target = store.worktree_path(repo, name)
     try:
         await git.remove_worktree(Path(repo.path), target)
     except GitError as exc:

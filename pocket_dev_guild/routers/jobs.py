@@ -11,8 +11,7 @@ from typing import Annotated, get_args
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import RepoRegistry
-from ..deps import get_conversations, get_registry, get_runner, get_store
+from ..deps import get_conversations, get_repo_store, get_runner, get_store
 from ..schemas import (
     IDENT_PATTERN,
     JobCreate,
@@ -26,6 +25,7 @@ from ..services.augment_runner import AugmentRunner
 from ..services.conversation_orchestrator import run_conversation_turn
 from ..services.conversation_store import ConversationStore
 from ..services.job_store import JobStore
+from ..services.repo_store import RepoStore
 from ._pagination import DEFAULT_LIMIT, MAX_LIMIT, parse_sort
 
 _JOB_SORT_FIELDS = {"created_at", "finished_at", "status"}
@@ -40,7 +40,7 @@ async def start_job(
     worktree: str | None,
     prompt: str,
     conversation_id: str | None,
-    registry: RepoRegistry,
+    repo_store: RepoStore,
     store: JobStore,
     runner: AugmentRunner,
     conversations: ConversationStore,
@@ -52,13 +52,13 @@ async def start_job(
     orchestrator handles session discovery + summary; otherwise it's a
     plain one-shot run.
     """
-    repo = registry.get(repo_id)
+    repo = await repo_store.get(repo_id)
     if repo is None:
         raise HTTPException(404, f"Repo '{repo_id}' not found")
     if worktree is None:
         target = Path(repo.path)
     else:
-        target = registry.worktree_path(repo, worktree)
+        target = repo_store.worktree_path(repo, worktree)
     if not target.exists():
         label = worktree if worktree is not None else "<primary>"
         raise HTTPException(404, f"Worktree '{label}' not found at {target}")
@@ -102,7 +102,7 @@ async def start_job(
 @router.post("", response_model=JobCreated, summary="Start an augment run")
 async def create_job(
     body: JobCreate,
-    registry: RepoRegistry = Depends(get_registry),
+    repo_store: RepoStore = Depends(get_repo_store),
     store: JobStore = Depends(get_store),
     runner: AugmentRunner = Depends(get_runner),
     conversations: ConversationStore = Depends(get_conversations),
@@ -112,7 +112,7 @@ async def create_job(
         worktree=body.worktree,
         prompt=body.prompt,
         conversation_id=body.conversation_id,
-        registry=registry,
+        repo_store=repo_store,
         store=store,
         runner=runner,
         conversations=conversations,
