@@ -15,9 +15,17 @@ router = APIRouter(prefix="/repos", tags=["repos"])
 
 
 @router.get("", response_model=list[Repo], summary="List all repositories")
-async def list_repos(store: RepoStore = Depends(get_repo_store)) -> list[Repo]:
-    """List all registered repositories."""
-    return await store.list()
+async def list_repos(
+    include_inactive: bool = False,
+    store: RepoStore = Depends(get_repo_store),
+) -> list[Repo]:
+    """List all registered repositories.
+
+    Args:
+        include_inactive: If True, include inactive (soft-deleted) repositories.
+                         Defaults to False (only active repos).
+    """
+    return await store.list(include_inactive=include_inactive)
 
 
 @router.post("", response_model=Repo, summary="Register an existing repository")
