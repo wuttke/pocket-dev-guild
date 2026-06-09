@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 API_URL="http://localhost:8000"
 LOG_FILE="/tmp/pdg-uvicorn.log"
 PID_FILE="/tmp/pdg-uvicorn.pid"
+MAIN_BRANCH="main"
 DRY_RUN=false
 FORCE=false
 
@@ -139,7 +140,7 @@ start_server() {
             local count=0
             while ! check_server_health && [[ $count -lt 10 ]]; do
                 sleep 1
-                ((count++))
+                count=$((count + 1))
             done
 
             if check_server_health; then
@@ -166,7 +167,7 @@ stop_server() {
         local count=0
         while kill -0 "$pid" 2>/dev/null && [[ $count -lt 10 ]]; do
             sleep 1
-            ((count++))
+            count=$((count + 1))
         done
         
         # Force kill if still running
@@ -180,8 +181,51 @@ stop_server() {
     fi
 }
 
+# Check git branch and freshness against origin
+check_git_state() {
+    local current_branch
+    current_branch=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+    if [[ -z "$current_branch" ]]; then
+        log "⚠️  Not a git repository or no current branch - skipping git checks"
+        return
+    fi
+
+    if [[ "$current_branch" != "$MAIN_BRANCH" ]]; then
+        log "⚠️  WARNING: Current branch is '$current_branch', not '$MAIN_BRANCH'"
+    else
+        log "On branch '$current_branch'"
+    fi
+
+    log "Fetching from origin..."
+    if ! git -C "$SCRIPT_DIR" fetch origin "$MAIN_BRANCH" 2>/dev/null; then
+        log "⚠️  WARNING: git fetch failed - cannot verify remote state"
+        return
+    fi
+
+    local local_sha remote_sha
+    local_sha=$(git -C "$SCRIPT_DIR" rev-parse "$MAIN_BRANCH" 2>/dev/null || echo "")
+    remote_sha=$(git -C "$SCRIPT_DIR" rev-parse "origin/$MAIN_BRANCH" 2>/dev/null || echo "")
+
+    if [[ -z "$local_sha" ]] || [[ -z "$remote_sha" ]]; then
+        log "⚠️  WARNING: Could not resolve '$MAIN_BRANCH' or 'origin/$MAIN_BRANCH'"
+        return
+    fi
+
+    if [[ "$local_sha" != "$remote_sha" ]]; then
+        local behind ahead
+        behind=$(git -C "$SCRIPT_DIR" rev-list --count "$MAIN_BRANCH..origin/$MAIN_BRANCH" 2>/dev/null || echo "?")
+        ahead=$(git -C "$SCRIPT_DIR" rev-list --count "origin/$MAIN_BRANCH..$MAIN_BRANCH" 2>/dev/null || echo "?")
+        log "⚠️  WARNING: '$MAIN_BRANCH' is not in sync with 'origin/$MAIN_BRANCH' (behind: $behind, ahead: $ahead)"
+    else
+        log "'$MAIN_BRANCH' is up to date with 'origin/$MAIN_BRANCH'"
+    fi
+}
+
 # Main deployment logic
 main() {
+    check_git_state
+
     log "Checking server status..."
     
     if ! check_server_running; then
