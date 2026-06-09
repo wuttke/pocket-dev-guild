@@ -191,17 +191,18 @@ class GitService:
 
         # Skip unpushed commit check if in detached HEAD state
         if current_branch != "HEAD":
-            # Get the upstream branch
-            code, upstream_out, _ = await self._run(
-                ["rev-parse", "--abbrev-ref", f"{current_branch}@{{upstream}}"],
+            # Try to determine the push destination using git's @{push} syntax
+            # This respects push.default configuration and branch.*.pushRemote
+            code, push_out, _ = await self._run(
+                ["rev-parse", "--abbrev-ref", "@{push}"],
                 worktree_path
             )
 
             if code == 0:
-                # Upstream exists, check for unpushed commits
-                upstream = upstream_out.strip()
+                # Push destination exists - check for unpushed commits
+                push_branch = push_out.strip()
                 code, diff_out, err = await self._run(
-                    ["rev-list", f"{upstream}..{current_branch}", "--count"],
+                    ["rev-list", f"{push_branch}..{current_branch}", "--count"],
                     worktree_path
                 )
                 if code != 0:
@@ -209,10 +210,46 @@ class GitService:
 
                 unpushed_count = int(diff_out.strip())
                 if unpushed_count > 0:
-                    messages.append(f"Unpushed commits: {unpushed_count} commit(s) on branch {current_branch}")
+                    messages.append(f"Unpushed commits: {unpushed_count} commit(s) not on {push_branch}")
             else:
-                # No upstream branch configured
-                messages.append(f"No upstream branch configured for {current_branch}")
+                # No push destination configured or resolvable.
+                # Fall back to checking for a same-named branch on the default remote.
+                code, remote_out, _ = await self._run(["remote"], worktree_path)
+                if code == 0 and remote_out.strip():
+                    remotes = [r for r in remote_out.split() if r]
+                    if remotes:
+                        # Pick the remote: prefer 'origin', otherwise use the only remote
+                        remote = "origin" if "origin" in remotes else (remotes[0] if len(remotes) == 1 else None)
+
+                        if remote:
+                            # Check if a same-named remote branch exists (e.g., origin/feature/foo)
+                            remote_branch = f"{remote}/{current_branch}"
+                            code, _, _ = await self._run(
+                                ["rev-parse", "--verify", remote_branch],
+                                worktree_path
+                            )
+
+                            if code == 0:
+                                # Remote branch exists - check for unpushed commits
+                                code, diff_out, err = await self._run(
+                                    ["rev-list", f"{remote_branch}..{current_branch}", "--count"],
+                                    worktree_path
+                                )
+                                if code != 0:
+                                    raise GitError(err.strip() or "git rev-list failed", code)
+
+                                unpushed_count = int(diff_out.strip())
+                                if unpushed_count > 0:
+                                    messages.append(f"Unpushed commits: {unpushed_count} commit(s) not on {remote_branch}")
+                            else:
+                                # No same-named remote branch exists - warn about unpushed local branch
+                                messages.append(f"Branch {current_branch} has not been pushed to {remote}")
+                    else:
+                        # No remotes configured - local-only repository
+                        messages.append(f"Local-only branch {current_branch} (no remote configured)")
+                else:
+                    # No remotes configured - local-only repository
+                    messages.append(f"Local-only branch {current_branch} (no remote configured)")
 
         is_clean = len(messages) == 0
         return is_clean, messages

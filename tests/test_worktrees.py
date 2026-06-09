@@ -472,6 +472,147 @@ def test_worktree_status_unpushed_commits(app_factory, tmp_config) -> None:
         assert any("Unpushed commits" in msg for msg in data["messages"])
 
 
+def test_worktree_status_branch_pushed_to_same_named_remote(app_factory, tmp_config) -> None:
+    """Test status endpoint when branch is pushed to same-named remote branch."""
+    from pocket_dev_guild.services.git_service import GitService
+
+    _config, repo_path = tmp_config
+
+    # Create a real worktree directory with a git repo
+    wt_path = repo_path.parent / "demo-worktrees" / "feature_pushed"
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize a git repo with a remote
+    import subprocess
+    subprocess.run(["git", "init"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=wt_path, check=True)
+
+    # Create initial commit
+    (wt_path / "test.txt").write_text("content")
+    subprocess.run(["git", "add", "."], cwd=wt_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=wt_path, check=True)
+
+    # Add a remote and push to main
+    remote_path = wt_path.parent / "remote_repo"
+    remote_path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "--bare"], cwd=remote_path, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote_path)], cwd=wt_path, check=True)
+    subprocess.run(["git", "push", "origin", "master:main"], cwd=wt_path, check=True)
+    subprocess.run(["git", "fetch", "origin"], cwd=wt_path, check=True)
+
+    # Create a feature branch that tracks origin/main (not the same-named remote branch)
+    subprocess.run(["git", "checkout", "-b", "feature/test"], cwd=wt_path, check=True)
+    subprocess.run(["git", "branch", "--set-upstream-to=origin/main"], cwd=wt_path, check=True)
+
+    # Push the feature branch to origin (creates origin/feature/test)
+    subprocess.run(["git", "push", "origin", "feature/test"], cwd=wt_path, check=True)
+
+    # Verify the branch tracks origin/main (not origin/feature/test)
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "feature/test@{upstream}"],
+        cwd=wt_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "origin/main"
+
+    # Use real GitService for this test
+    app = app_factory(git=GitService())
+
+    with TestClient(app) as client:
+        resp = client.get("/api/repos/demo/worktrees/feature_pushed/status")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        # Should be clean - no uncommitted changes, branch is pushed to origin/feature/test
+        # (even though it tracks origin/main)
+        assert data["is_clean"] is True
+        assert data["messages"] == []
+
+
+def test_worktree_status_branch_not_pushed(app_factory, tmp_config) -> None:
+    """Test status endpoint detects when branch hasn't been pushed to remote."""
+    from pocket_dev_guild.services.git_service import GitService
+
+    _config, repo_path = tmp_config
+
+    # Create a real worktree directory with a git repo
+    wt_path = repo_path.parent / "demo-worktrees" / "feature_not_pushed"
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize a git repo with a remote
+    import subprocess
+    subprocess.run(["git", "init"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=wt_path, check=True)
+
+    # Create initial commit
+    (wt_path / "test.txt").write_text("content")
+    subprocess.run(["git", "add", "."], cwd=wt_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=wt_path, check=True)
+
+    # Add a remote but DON'T push the branch
+    remote_path = wt_path.parent / "remote_not_pushed"
+    remote_path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "--bare"], cwd=remote_path, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote_path)], cwd=wt_path, check=True)
+
+    # Create a feature branch but don't push it
+    subprocess.run(["git", "checkout", "-b", "feature/local-only"], cwd=wt_path, check=True)
+
+    # Use real GitService for this test
+    app = app_factory(git=GitService())
+
+    with TestClient(app) as client:
+        resp = client.get("/api/repos/demo/worktrees/feature_not_pushed/status")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        # Should NOT be clean - branch hasn't been pushed
+        assert data["is_clean"] is False
+        assert len(data["messages"]) >= 1
+        # Check for "not been pushed" message
+        assert any("has not been pushed" in msg for msg in data["messages"])
+
+
+def test_worktree_status_local_only_no_remote(app_factory, tmp_config) -> None:
+    """Test status endpoint detects when branch is local-only with no remote configured."""
+    from pocket_dev_guild.services.git_service import GitService
+
+    _config, repo_path = tmp_config
+
+    # Create a real worktree directory with a git repo
+    wt_path = repo_path.parent / "demo-worktrees" / "feature_local_only"
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize a git repo WITHOUT any remote
+    import subprocess
+    subprocess.run(["git", "init"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=wt_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=wt_path, check=True)
+
+    # Create initial commit
+    (wt_path / "test.txt").write_text("content")
+    subprocess.run(["git", "add", "."], cwd=wt_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=wt_path, check=True)
+
+    # Create a feature branch (no remote at all)
+    subprocess.run(["git", "checkout", "-b", "feature/local-only"], cwd=wt_path, check=True)
+
+    # Use real GitService for this test
+    app = app_factory(git=GitService())
+
+    with TestClient(app) as client:
+        resp = client.get("/api/repos/demo/worktrees/feature_local_only/status")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        # Should NOT be clean - no remote configured
+        assert data["is_clean"] is False
+        assert len(data["messages"]) >= 1
+        # Check for "no remote configured" message
+        assert any("no remote configured" in msg.lower() for msg in data["messages"])
+
+
 def test_worktree_status_not_found(client: TestClient) -> None:
     """Test status endpoint returns 404 for non-existent worktree."""
     resp = client.get("/api/repos/demo/worktrees/nonexistent/status")
