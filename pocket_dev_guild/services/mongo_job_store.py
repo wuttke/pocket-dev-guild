@@ -62,7 +62,15 @@ class MongoJobStore:
         )
         # model_dump() keeps datetimes native so motor stores them as BSON
         # dates, consistent with set_status()/set_session_meta().
-        await self._jobs.insert_one(info.model_dump())
+        try:
+            result = await self._jobs.insert_one(info.model_dump())
+            logger.debug(
+                f"Created job {job_id} - inserted_id: {result.inserted_id}, "
+                f"acknowledged: {result.acknowledged}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to insert job {job_id} into database: {e}")
+            raise
         return info
 
     async def get(self, job_id: str) -> JobInfo | None:
@@ -197,10 +205,15 @@ class MongoJobStore:
             if status in ("finished", "failed", "cancelled"):
                 update["finished_at"] = datetime.now(timezone.utc)
 
-            await self._jobs.update_one(
+            result = await self._jobs.update_one(
                 {"id": job_id},
                 {"$set": update}
             )
+            if result.matched_count == 0:
+                logger.warning(
+                    f"set_status for job {job_id} matched 0 documents - "
+                    f"job may not exist in database"
+                )
             await self._notifications.notify(f"job:{job_id}")
         except Exception as e:
             logger.error(f"Failed to set status for job {job_id}: {e}")
@@ -223,10 +236,15 @@ class MongoJobStore:
             return
 
         try:
-            await self._jobs.update_one(
+            result = await self._jobs.update_one(
                 {"id": job_id},
                 {"$set": update}
             )
+            if result.matched_count == 0:
+                logger.warning(
+                    f"set_session_meta for job {job_id} matched 0 documents - "
+                    f"job may not exist in database"
+                )
             await self._notifications.notify(f"job:{job_id}")
         except Exception as e:
             logger.error(f"Failed to set session meta for job {job_id}: {e}")

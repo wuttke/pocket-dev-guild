@@ -214,3 +214,32 @@ async def test_list_filter_by_conversation_id(mongo_db) -> None:
     listed = await store.list(conversation_id="conv-1")
     assert [j.id for j in listed] == [a.id]
     assert await store.count(conversation_id="conv-1") == 1
+
+
+@pytest.mark.asyncio
+async def test_set_status_on_orphaned_running_job(mongo_db) -> None:
+    """Test canceling an orphaned job (running status but no process).
+
+    This simulates the bug scenario: a job is stuck in "running" state
+    (e.g., after server restart killed the subprocess), and we try to
+    cancel it via set_status("cancelled").
+    """
+    store = MongoJobStore(mongo_db)
+    info = await store.create(repo_id="demo", worktree="wt", prompt="p")
+
+    # Simulate the job reaching "running" state
+    await store.set_status(info.id, "running")
+    running = await store.get(info.id)
+    assert running is not None
+    assert running.status == "running"
+    assert running.finished_at is None
+
+    # Now cancel it (as the DELETE endpoint would do for an orphaned job)
+    await store.set_status(info.id, "cancelled", returncode=None)
+
+    # Verify the status was actually updated
+    cancelled = await store.get(info.id)
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert cancelled.finished_at is not None
+    assert cancelled.returncode is None
